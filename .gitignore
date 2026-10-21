@@ -1,0 +1,7 @@
+build/
+build-*/
+*.uf2
+*.elf
+*.map
+include/robot_local.h
+firmware/robot_secrets.h

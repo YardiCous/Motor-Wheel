@@ -27,6 +27,15 @@ The documents do not identify the final IMU or barcode format. This implementati
 
 For networking, copy `firmware/robot_secrets.example.h` to `firmware/robot_secrets.h` and set Wi-Fi/broker details. Both local files are ignored by Git. Without credentials, local operation still works. Commands and telemetry are binary; see [the protocol table](docs/data-representation.md). MQTT uses the configured local broker over TCP; TLS is not implemented.
 
+Wi-Fi driver initialization and station setup run before the scheduler and safety
+watchdog start, because the SDK uses blocking sleeps during radio startup. The
+Network task handles polling, association, MQTT and connection retries. If driver
+initialization fails, local operation continues with networking disabled until reboot.
+
+Run `python3 tests/test_kernel_startup.py` to check kernel startup ordering and
+dispatch guards using simulated kernel boundaries. This does not validate interrupt
+delivery on the board; use `ROBOT_ON_TARGET_TESTS=ON` for on-board tests.
+
 ## Implemented
 
 - Seven native micro-T tasks, copied message buffers, event flags and synchronized compact snapshots.

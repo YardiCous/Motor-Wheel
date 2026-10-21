@@ -115,9 +115,20 @@ static void dns_result(const char *name, const ip_addr_t *address, void *arg) {
     } else
         retry();
 }
-void network_init(void) {
+void network_prepare(void) {
+    /* Radio power-up, firmware upload and station setup include SDK sleeps.
+     * Complete them before the robot's deadlines and 30 ms watchdog start. */
     memset(&network, 0, sizeof(network));
     network.backoff_seconds = 1;
+    if (!ROBOT_WIFI_SSID[0])
+        return;
+    if (cyw43_arch_init() != 0)
+        return;
+    network.initialized = 1;
+    cyw43_arch_enable_sta_mode();
+}
+void network_init(void) {
+    /* Keep the driver prepared by main; shared robot state now exists. */
     robot_network_status(false, false);
 }
 static void publish_snapshot(void) {
@@ -158,19 +169,15 @@ static void publish_snapshot(void) {
 void network_step(void) {
     if (!ROBOT_WIFI_SSID[0])
         return; /* Local/autonomous operation does not require WiFi. */
+    if (!network.initialized) {
+        /* A failed hardware initialization must not block the running safety
+         * tasks. A reboot retries preparation; association/MQTT retry below. */
+        return;
+    }
     uint16_t now = robot_now();
-    if (network.initialized)
-        cyw43_arch_poll();
+    cyw43_arch_poll();
     switch ((network_state_t)network.state) {
     case NET_INIT:
-        if (!network.initialized) {
-            if (cyw43_arch_init() != 0) {
-                retry();
-                return;
-            }
-            network.initialized = 1;
-            cyw43_arch_enable_sta_mode();
-        }
         if (!client)
             client = mqtt_client_new();
         if (!client) {

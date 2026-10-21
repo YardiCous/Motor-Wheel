@@ -8,6 +8,7 @@ int main(void) {
     set_sys_clock_khz(125000, true);
     board_init();
     stdio_init_all();
+    network_prepare();
 #ifdef ROBOT_ON_TARGET_TESTS
     robot_core_tests();
 #endif

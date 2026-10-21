@@ -33,7 +33,8 @@ target_include_directories(motor_wheel PRIVATE include firmware)
 target_link_libraries(motor_wheel PRIVATE micro_t pico_stdlib hardware_adc hardware_i2c
     hardware_pwm hardware_watchdog pico_cyw43_arch_lwip_poll pico_lwip_mqtt m)
 target_compile_options(motor_wheel PRIVATE -Wall -Wextra -Werror)
-target_compile_definitions(motor_wheel PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=0)
+target_compile_definitions(motor_wheel PRIVATE PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=0
+    PICO_STDIO_USB_STDOUT_TIMEOUT_US=0 PICO_STDIO_DEADLOCK_TIMEOUT_MS=0)
 pico_enable_stdio_usb(motor_wheel 1)
 pico_enable_stdio_uart(motor_wheel 0)
 pico_add_extra_outputs(motor_wheel)

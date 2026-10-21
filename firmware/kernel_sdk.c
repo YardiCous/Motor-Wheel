@@ -3,11 +3,15 @@
 #include "hardware/clocks.h"
 #include "hardware/exception.h"
 #include "hardware/irq.h"
+#include "hardware/structs/systick.h"
 #include "pico/stdlib.h"
 
 void sdk_kernel_install(void (*dispatch)(void), void (*tick)(void)) {
     if (clock_get_hz(clk_sys) != 125000000u)
         panic("micro-T requires 125 MHz");
+    /* Force the first tick to use our reload value, with no inherited countdown. */
+    systick_hw->csr = 0;
+    systick_hw->cvr = 0;
     exception_set_exclusive_handler(PENDSV_EXCEPTION, dispatch);
     exception_set_exclusive_handler(SYSTICK_EXCEPTION, tick);
     /* Match the supplied port: SysTick must not interrupt a partial dispatch. */

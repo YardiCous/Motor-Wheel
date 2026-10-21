@@ -53,12 +53,17 @@ _Noreturn void kernel_start(void (*entry)(INT, void *)) {
     sdk_kernel_install(knl_dispatch_entry, timer_interrupt);
     if (knl_init_Imalloc() < E_OK || knl_init_object() < E_OK)
         sdk_kernel_panic("micro-T initialization");
+    /* Match upstream sysinit: initialize time and its wait queue before any
+     * application task can become runnable. Keep dispatch blocked even if an
+     * SDK operation temporarily enables interrupts during this transition. */
+    knl_dispatch_disabled = DDS_DISABLE;
+    DISABLE_INTERRUPT;
+    if (knl_timer_startup() < E_OK)
+        sdk_kernel_panic("micro-T timer");
     T_CTSK init = {.tskatr = TA_HLNG | TA_RNG0, .task = (FP)entry, .itskpri = 1, .stksz = 4096};
     ID task = tk_cre_tsk(&init);
     if (task < E_OK || tk_sta_tsk(task, 0) < E_OK)
         sdk_kernel_panic("micro-T initial task");
-    if (knl_timer_startup() < E_OK)
-        sdk_kernel_panic("micro-T timer");
     knl_force_dispatch();
     for (;;)
         __asm__ volatile("nop");

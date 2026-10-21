@@ -94,6 +94,7 @@ void obstacle_step(void);
 void obstacle_reset(void);
 void navigation_step(void);
 void navigation_reset(void);
+void network_prepare(void);
 void network_init(void);
 void network_step(void);
 /* Native task-local service states reset via a shared generation counter below. */

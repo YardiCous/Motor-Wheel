@@ -34,6 +34,13 @@ Configure `ROBOT_ON_TARGET_TESTS=ON`. Before starting robot tasks, the firmware 
 
 These tests compile into the Pico W test image. Their runtime results must be captured on the board. A pass does not substitute for end-to-end sensor/actuator tests.
 
+To perform the basic actuator checkout, build with `ROBOT_MOTOR_TESTS=ON`.
+The opt-in sequence tests forward, reverse, left pivot and right pivot with
+stops between commands. It is a direct PWM wiring test, not a validation of
+closed-loop distance or turn accuracy. Perform it with the wheels lifted,
+confirm the E-stop first, and record motor polarity and encoder direction
+before enabling `ROBOT_CALIBRATION_CONFIRMED`.
+
 ## Required hardware acceptance checks
 
 | Requirement | Acceptance/evidence |

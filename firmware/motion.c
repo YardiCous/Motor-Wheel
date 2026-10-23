@@ -78,6 +78,12 @@ static void accept(const motion_msg_t *message) {
         robot_raise_fault(F_NAVIGATION);
         return;
     }
+    if ((kind == MOVE_FOLLOW || kind == MOVE_SEARCH ||
+         ((kind == MOVE_DISTANCE || kind == MOVE_TURN) && argument != 0)) &&
+        speed == 0) {
+        robot_raise_fault(F_NAVIGATION);
+        return;
+    }
     motion_reset();
     motion.kind = kind;
     motion.speed = speed;

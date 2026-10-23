@@ -64,4 +64,13 @@ cmake --build build-pico-tests -j4
 
 The test image checks packed formats, controller guards and encoder arithmetic at startup, then exercises the real micro-T message buffers, event flags and delays. A failed assertion stops startup with motor outputs off. USB output can be missed if the host connects after startup; use a debugger to inspect assertions. The cross-build and UF2 checks have been performed here; these on-board tests have **not** been executed on physical hardware.
 
+For a physical motor checkout, build a separate image with
+`-DROBOT_MOTOR_TESTS=ON`. After a three-second warning, it runs each wheel
+forward, backward, pivot-left and pivot-right at 35% duty for one second,
+with an explicit stop between steps. Lift the robot clear of the floor before
+flashing this image. The E-stop is checked during every movement step, and
+outputs are stopped before the firmware starts normal tasks. This test bypasses
+navigation and encoder control; use it only to verify motor wiring, polarity
+and basic operation.
+
 Read [architecture and wiring](docs/architecture.md), [data representation](docs/data-representation.md), and [validation status](docs/validation.md) before board integration. The code is implemented and cross-compiled; timing, braking, barcode recognition and navigation accuracy still require the actual robot.

@@ -1,24 +1,16 @@
-# Subsystem 3 — test log
+# Subsystem 3 — Line tracking and barcode perception
 
-**Subsystem:** Consumer (example)  ·  **Student ID:** <student ID>  ·  **Code:** `app_program/subsystem3/`
+Student ID: 2501069. Source: `app_program/subsystem3/`.
+Starter example test cases have been replaced by robot acceptance cases.
 
-See `testing/README.md` for how to run tests and record results.
+| Test | Method | Criterion | Status / evidence |
+|---|---|---|---|
+| Host behavior | Instrumented C99 suite | Four symbols, ambiguous/reverse frame rejection and line loss | PASS; [host log](../evidence/host_tests.txt) |
+| Physical qualification | H05, H08 in the [test plan](../../docs/validation.md) | Apply the numerical acceptance criteria in that plan | Not run |
 
-## Test cases
+## Physical run record
 
-Define a test here before running it. Test IDs never change.
+Record a row for every measured run; retain previous results.
 
-| ID | What is tested | Requirement / interface | Method | Steps / how | Expected result |
+| Date | Test ID | Firmware/configuration | Tester | Result | Measurement / evidence link |
 |---|---|---|---|---|---|
-| S3-U01 | statistics self-consistent (min ≤ max, 0..100) | | auto | `subsystem3_test.c` | `[TEST] S3-U01 PASS` |
-
-*Method:* **auto** = `TEST_CHECK` in code, result printed on the console;
-**manual** = a person observes the result (LED, scope, meter, phone app…).
-
-## Results
-
-Add a new row for every run. Never edit or delete old rows.
-
-| Date | Test ID | Commit | Tester | Result | Log / evidence | Notes |
-|---|---|---|---|---|---|---|
-| YYYY-MM-DD | S3-U01 | `abc1234` | | PASS / FAIL | `logs/YYYY-MM-DD_….txt` | |

@@ -24,3 +24,7 @@ config/wifi_secrets.h
 
 # macOS
 .DS_Store
+
+# Local Python tooling
+__pycache__/
+*.pyc

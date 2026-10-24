@@ -1,0 +1,13 @@
+profile text_bytes data_bytes bss_bytes static_ram_bytes status
+dual-core-radio 291785 88 24552 24640 PASS
+dual-core-offline 77212 36 22276 22312 PASS
+dual-core-mqtt 346465 96 82136 82232 PASS
+dual-core-mqtt-selftest 346705 96 82136 82232 PASS
+single-core-mqtt 339529 84 78008 78092 PASS
+UART/CRASH_REPORT pin conflict rejected: PASS
+
+Original starter (different functionality, not packing baseline):
+dual-core-radio 285752 88 24476 24564 measured before replacement
+
+Static RAM = data+bss; dynamic RTOS stacks/queues and network heap
+must be accounted separately. See docs/validation.md.

@@ -1,193 +1,82 @@
-# Team and subsystems
+# CSC20 ownership and interfaces
 
-The tables are pre-filled with the **example** in `app_program/` (marked
-*example*). Replace those rows with your own as you replace the example code.
+Assignments come from the supplied design review and Tribunal 1 documents.
 
-Fill this in at the start of the project and keep it up to date. It is the
-single place that says **who owns what**, so that five people can work in
-one firmware image without clashing over pins, priorities, or kernel objects.
-
-A **subsystem** is one student's part of the product, with its own folder.
-It may contain several tasks and own several peripherals (see section 3).
-
-Rule: **only the owner edits a subsystem's folders.** To change another
-subsystem, ask its owner or open a pull request for them to review.
-
-## 1. Members and subsystems
-
-| # | Subsystem (what it does) | Student ID | GitHub username | Code | Tests |
-|---|---|---|---|---|---|
-| 1 | *example:* LED heartbeat on GP19 | | | `app_program/subsystem1/` | `testing/subsystem1/` |
-| 2 | *example:* Producer: makes a sample every 300 ms | | | `app_program/subsystem2/` | `testing/subsystem2/` |
-| 3 | *example:* Consumer: collects samples into statistics | | | `app_program/subsystem3/` | `testing/subsystem3/` |
-| 4 | *example:* Monitor: prints reports, pauses the LED | | | `app_program/subsystem4/` | `testing/subsystem4/` |
-| 5 | | | | `app_program/subsystem5/` | `testing/subsystem5/` |
-
-Shared files (`app_program/app_main.c`, `app_program/app.h`, this file)
-are changed only by agreement of the team. The exception is claiming an empty
-row in this file (a pin, a peripheral, an interface ID), which anyone may do
-(section 2).
-
-## 2. Pins
-
-One owner per pin. Claim a pin here **before** you wire or code it.
-
-**Why:** two subsystems using the same pin is one of the most common and
-hardest-to-find mistakes in a team project. The code builds without any
-error, but the hardware misbehaves. Each subsystem can pass its own tests
-and then fail once they are combined, and two outputs driving the same pin
-against each other can damage it. Writing the claim down first means a clash
-is spotted when someone edits this table, not hours later on the bench.
-
-**No instructor check needed.** The team keeps this table itself. You do not
-need the instructor, or the rest of the team, to check or approve a claim:
-if the row is empty, fill it in and commit. If two people claim the same
-pin, they agree between themselves who moves. Only the *reserved* rows are
-fixed.
-
-| Pin | Owner | Used for |
-|---|---|---|
-| GP23, GP24, GP25, GP29 | *reserved* | Pico W radio |
-| GP0 | | (taken whenever the team builds with `CRASH_REPORT=1`) |
-| GP1 | | (taken whenever the team builds with `CRASH_REPORT=1`) |
-| GP2 | | |
-| GP3 | | |
-| GP4 | | |
-| GP5 | | |
-| GP6 | | |
-| GP7 | | |
-| GP8 | | |
-| GP9 | | |
-| GP10 | | |
-| GP11 | | |
-| GP12 | | |
-| GP13 | | |
-| GP14 | | |
-| GP15 | | |
-| GP16 | | |
-| GP17 | | |
-| GP18 | | |
-| GP19 | *example:* S1 | external LED (LED + 330 Ω to GND) |
-| GP20 | | |
-| GP21 | | |
-| GP22 | | |
-| GP26 | | (ADC0 capable) |
-| GP27 | | (ADC1 capable) |
-| GP28 | | (ADC2 capable) |
-
-## 3. Peripherals
-
-**Subsystems, tasks and peripherals are three different things:**
-
-| Term | What it is | Example |
-|---|---|---|
-| **Subsystem** | one student's part of the product, one folder | "environment sensing", "motor control", "user interface" |
-| **Task** | one thread of execution. A subsystem may have **as many tasks as it needs** | a sampling task and a filtering task, both in "environment sensing" |
-| **Peripheral** | one hardware block on the RP2040 | I2C0, UART1, the ADC |
-
-A driver is **not** a subsystem. It is code *inside* the subsystem that
-needs that hardware: the "environment sensing" subsystem contains the I2C
-sensor code, and owns I2C0. Write it as `drv_<name>.c` / `drv_<name>.h` in
-that subsystem's folder, never under `device/`, and call it only from the
-peripheral's owning task. The kernel's own drivers in `device/` (serial,
-I2C, ADC) may be used instead; switching one on in `config/config_device.h`
-changes shared configuration, so record it in the table below first.
-
-**The rule: each peripheral is driven by exactly one task, its *owning
-task*.** That task can be in any subsystem, and one subsystem may own
-several peripherals (one owning task each, or one task owning all of them).
-Every other task, in the same subsystem or another one, asks the owning task
-through a kernel object (section 5) and never touches that peripheral itself.
-
-*Why:* this port runs tasks on both cores at the same time. If two tasks
-drive the same I2C or UART block at once, their transfers get mixed up, and
-the drivers have no locking to stop it.
-
-| Peripheral | Owner subsystem | Owning task | Pins |
+| Buddy | Student ID | Subsystem | Code |
 |---|---|---|---|
-| UART1 | | | |
-| I2C0 | | | |
-| I2C1 | | | |
-| SPI0 | | | |
-| SPI1 | | | |
-| ADC | | | GP26–GP28 |
-| PWM slices (list) | | | |
-| WiFi radio, TCP/IP, MQTT | *kernel* | `cyw43_utk_task` (built in) | GP23–25, GP29 |
+| Wylie | 2500642 | Binary communications and telemetry | `app_program/subsystem1/`, `mqtt_utk.c` |
+| Gordon | 2500206 | Motion, encoders, PID | `app_program/subsystem2/` |
+| Jia Jun | 2501069 | Line and barcode perception | `app_program/subsystem3/` |
+| Ernest | 2500381 | Terrain, collision, safety | `app_program/subsystem4/` |
+| Yu Da | 2500145 | Obstacle handling and navigation | `app_program/subsystem5/` |
 
-### WiFi and MQTT are special
+`robot_os` owns RTOS integration, shared packed fields, and lifecycle.
+`board_io` confines MMIO and ISR installation; its runtime peripheral callers
+are limited to their owning tasks below.
 
-The radio and the network stack belong to the kernel's built-in WiFi service
-task, `cyw43_utk_task` (`lib/libwifi/sysdepend/pico_rp2040/`). **No student
-task may call `cyw43_...`, lwIP or MQTT functions, not even from a
-"WiFi subsystem".** The calls are not safe from any other task, on either core.
+## Pins and peripherals
 
-What students *can* do:
-
-- **Read the connection state** from any task, which is always safe:
-  ```c
-  #include "cyw43_utk.h"
-  T_CYW43_UTK_STATUS st;
-  cyw43_utk_get_status(&st);   /* st.ready, st.link_status, st.ip_addr, ... */
-  ```
-- **Send or receive data over the network** by adding code that *runs
-  inside the service task*. The MQTT client is in
-  `lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.c`. It publishes a heartbeat
-  today. A "cloud / reporting" subsystem would add a kernel object
-  (e.g. a message buffer) that application tasks fill. The MQTT code then
-  reads it with `TMO_POL` (never blocking) and publishes it.
-  Because this changes shared library code, **agree it with the team and
-  the instructor first**, and record it as an interface in section 5.
-  It needs the `NET=lwip MQTT=1` build (README section 3).
-
-## 4. Task priorities
-
-1 is the highest. 1–4 are used by the kernel (USB console 3, WiFi 4). Each subsystem gets its own band by default;
-change it only by team agreement. Write down every task you create.
-
-| Subsystem | Priority band | Tasks (name – priority – core) |
+| Pins | Peripheral / signal | Owner |
 |---|---|---|
-| 1 | 12–13 | *example:* led_task – 12 – any |
-| 2 | 14–15 | *example:* producer_task – 14 – core 1 |
-| 3 | 16–17 | *example:* consumer_task – 16 – core 0 |
-| 4 | 18–19 | *example:* monitor_task – 18 – any |
-| 5 | 20–21 | |
+| GP0 / GP1 | HC-SR04 TRIG / divided ECHO | Obstacle task / shared GPIO dispatcher |
+| GP2 / GP3 | I2C1 SDA / SCL; LSM303DLHC at 0x19 | Terrain task |
+| GP4 / GP5 | Left encoder A/B | GPIO ISR; motion reads snapshots |
+| GP8 / GP9 | Left bridge, PWM slice 4 A/B | Motion task |
+| GP10 / GP11 | Right bridge, PWM slice 5 A/B | Motion task |
+| GP12 | Servo, PWM slice 6 A | Obstacle task |
+| GP16 / GP17 | Right encoder A/B | GPIO ISR; motion reads snapshots |
+| GP18 | Actual motion-loop timing pulse | Motion task |
+| GP20 | Local START, active low | Navigation task |
+| GP21 | Local latched E-stop, active low | Navigation / Safety |
+| GP22 | Local RESET, active low | Navigation task |
+| GP26 / GP27 | ADC0/1, left/centre tracking inputs | Line task |
+| GP28 | ADC2, separate barcode lane | Line task |
+| GP23 / 24 / 25 / 29 | Reserved radio connections | Kernel WiFi service |
+| GP6 / 7 / 13 / 14 / 15 / 19 | Unclaimed | None |
 
-Core: `TP_PRC1` = core 0, `TP_PRC2` = core 1, or "any".
+The HC-SR04 needs external 5 V, common ground, and a divider/level shifter on
+ECHO. Leave the GP28 VBAT-sense jumper open. Route all three IR AO signals
+individually; do not allow a second Grove cable to drive GP26. The IMU and I2C
+pull-ups use 3.3 V. Verify motor and encoder polarity on blocks before driving.
 
-## 5. Interfaces between subsystems
+The application owns ADC and I2C1 directly. The unused kernel ADC/I2C drivers
+are disabled. PWM slices 4, 5, 6 and TIMER alarm 3 are reserved; the kernel's
+optional physical PWM timers remain disabled. There is one GPIO ISR for the
+four encoder edges and both echo edges. The application never replaces the
+CYW43 PIO/DMA interrupt owners.
 
-Every arrow between two subsystems is listed here. The **provider** creates
-the kernel object and publishes its ID in its own `subsystemN.h`; the **user** only
-sends to it or waits on it. Agree on the data format before coding.
+## Tasks and kernel objects
 
-| ID | From → To | Mechanism | Object ID name | Data / meaning | Agreed by |
-|---|---|---|---|---|---|
-| IF-01 | S2 → S3 | mailbox (owned by S3) | `mbx_samples` | `SAMPLE_MSG` in `subsystem2.h` | *example* |
-| IF-02 | S3 → S2 | semaphore + fixed memory pool (owned by S2) | `sem_slots`, `mpf_samples` | receiver returns the block, then 1 slot | *example* |
-| IF-03 | S3 → S4 | message buffer + event flag (owned by S4) | `mbf_summary`, `flg_events` | text line ≤ `S4_SUMMARY_MAX` bytes, then `FLG_BATCH` | *example* |
-| IF-04 | S4 → S3 | shared data under a mutex (owned by S3) | `app_stats`, `mtx_stats` | `APP_STATS`, read only while locked | *example* |
-| IF-05 | S4 → S1 | task control | `tid_led` | `tk_sus_tsk` / `tk_rsm_tsk` / `tk_chg_pri` | *example* |
-| IF-06 | | | | | |
+All seven application tasks and the existing WiFi task are pinned to processor
+1 (physical core 0) in SMP builds. Core 1 does not access application packed data.
 
-Each interface is tested by at least one integration test
-(`testing/integration/TEST_LOG.md`).
+| Task | Priority | Release | Stack bytes |
+|---|---:|---|---:|
+| Safety | 1 | 20 ms and immediate fault wake | 2048 |
+| Motion | 2 | 10 ms | 2048 |
+| Line/barcode | 2 | 5 ms | 2048 |
+| Terrain | 3 | 10 ms | 2048 |
+| Navigation | 5 | 10 ms | 2048 |
+| Obstacle | 6 | 60-ms pings; median every 180 ms; bounded settle | 2048 |
+| Telemetry producer | 8 | 250 ms | 2048 |
 
-## 6. Kernel object budget
+USB stays at kernel priority 3 and WiFi at 4. The priority change from the
+proposal places terrain ahead of WiFi, while navigation remains below it.
+The RTOS reserves **14,336 bytes** for these seven task stacks, separately from
+static `.bss` and queue storage. Stack high-water measurement remains open.
 
-Limits are set in `config/config.h`. If the team needs more, raise the
-limit there. The numbers below are the example's usage.
+| Interface | Producer → consumer | Payload / queue capacity | Policy |
+|---|---|---|---|
+| Motion command | Navigation → Motion | 24 bits in 3 bytes; 4 entries / 32 buffer bytes | Polling send; overflow latches fault; STOP flag flushes all entries |
+| Barcode event | Line → Navigation | 2 bits in 1 byte; 4 entries / 32 buffer bytes | One consumer; overflow latches fault |
+| Hump event | Terrain → Navigation | finished1 + peak8 + valid1, 2 bytes; 4 entries / 32 buffer bytes | Navigation alone consumes; ON_HUMP is separate shared status |
+| Supervisory command | Network → Navigation | command6 + arrival32, 5 bytes; 8 entries / 96 buffer bytes | Reject age >500 ms, duplicate/stale sequence, illegal state |
+| Telemetry | Producer → network owner | 28-byte packet + 4-byte time, 32 bytes; 1 entry / 36 buffer bytes | Replace oldest; reject age >500 ms; no outage backlog |
+| Acknowledgement | Navigation → network owner | 7 bits in 1 byte; 8 entries / 64 buffer bytes | Polling; excess ACKs dropped; motion never waits |
+| Echo completion | GPIO ISR → Obstacle | 1 event flag bit | Clear before ping; wait at most 25 ms |
+| Periodic releases | One 5-ms cyclic handler → tasks | Kernel wake-up requests | Collapse queued releases; no catch-up burst |
+| Latest state | Each owner → all interested readers | Explicitly packed 28-byte image | All RMW and coherent copies under saved core-0 IRQ mask |
+| Fault causes | Six owners → Safety | Six 12-bit masks, 9 bytes | Merge under IRQ mask; fatal bits latch until RESET |
 
-| Object | Limit | S1 | S2 | S3 | S4 | S5 |
-|---|---|---|---|---|---|---|
-| Task | 32 | 1 | 1 | 1 | 1 | |
-| Semaphore | 16 | | 1 | | | |
-| Event flag | 16 | | | | 1 | |
-| Mailbox | 12 | | | 1 | | |
-| Mutex | 12 | | | 1 | | |
-| Message buffer | 12 | | | | 1 | |
-| Fixed memory pool | 12 | | 1 | | | |
-| Variable memory pool | 12 | | | | | |
-| Cyclic handler | 12 | 1 | | | | |
-| Alarm handler | 12 | | | | 1 | |
-
-(The kernel's USB and WiFi service tasks also use a few of these.)
+Application budget: 7 tasks, 6 message buffers, 1 event flag and 1 cyclic
+handler, within the configured limits. Kernel USB/WiFi allocations are additional.

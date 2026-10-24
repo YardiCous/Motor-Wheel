@@ -444,6 +444,7 @@ ifeq ($(MQTT),1)
 
 MQTT_CORE_OBJS := ./mtkernel_3/lwip/apps/mqtt/mqtt.o
 MQTT_PORT_OBJS := ./mtkernel_3/lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.o
+$(MQTT_PORT_OBJS): CFLAGS += -std=c99 -Wall -Wextra -Werror -Wshadow -Wmissing-prototypes
 
 CFLAGS += -DTM_MQTT=1
 

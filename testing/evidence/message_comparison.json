@@ -1,0 +1,103 @@
+{
+  "method": "one 32-bit field per logical value, explicit LE baseline",
+  "messages": [
+    {
+      "message": "Motion snapshot",
+      "wide_bytes": 20,
+      "packed_bytes": 4,
+      "information_bits": 32
+    },
+    {
+      "message": "Motion command",
+      "wide_bytes": 16,
+      "packed_bytes": 3,
+      "information_bits": 24
+    },
+    {
+      "message": "Barcode event",
+      "wide_bytes": 4,
+      "packed_bytes": 1,
+      "information_bits": 2
+    },
+    {
+      "message": "Hump event",
+      "wide_bytes": 12,
+      "packed_bytes": 2,
+      "information_bits": 10
+    },
+    {
+      "message": "MQTT command",
+      "wide_bytes": 8,
+      "packed_bytes": 1,
+      "information_bits": 6
+    },
+    {
+      "message": "Supervisory queue entry",
+      "wide_bytes": 12,
+      "packed_bytes": 5,
+      "information_bits": 38
+    },
+    {
+      "message": "Telemetry wire packet",
+      "wide_bytes": 108,
+      "packed_bytes": 28,
+      "information_bits": 223
+    },
+    {
+      "message": "Telemetry queue entry",
+      "wide_bytes": 112,
+      "packed_bytes": 32,
+      "information_bits": 255
+    },
+    {
+      "message": "MQTT status",
+      "wide_bytes": 12,
+      "packed_bytes": 1,
+      "information_bits": 4
+    },
+    {
+      "message": "MQTT acknowledgement",
+      "wide_bytes": 16,
+      "packed_bytes": 1,
+      "information_bits": 8
+    }
+  ],
+  "queues": [
+    {
+      "queue": "Motion",
+      "depth": 4,
+      "wide_buffer_bytes": 80,
+      "packed_buffer_bytes": 32
+    },
+    {
+      "queue": "Barcode",
+      "depth": 4,
+      "wide_buffer_bytes": 32,
+      "packed_buffer_bytes": 32
+    },
+    {
+      "queue": "Hump",
+      "depth": 4,
+      "wide_buffer_bytes": 64,
+      "packed_buffer_bytes": 32
+    },
+    {
+      "queue": "Supervisory",
+      "depth": 8,
+      "wide_buffer_bytes": 128,
+      "packed_buffer_bytes": 96
+    },
+    {
+      "queue": "Telemetry",
+      "depth": 1,
+      "wide_buffer_bytes": 116,
+      "packed_buffer_bytes": 36
+    },
+    {
+      "queue": "ACK",
+      "depth": 8,
+      "wide_buffer_bytes": 128,
+      "packed_buffer_bytes": 64
+    }
+  ]
+}

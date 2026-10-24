@@ -1,0 +1,3 @@
+# BARR-C:2018 requires an end-of-file comment followed by a blank line.
+*.c whitespace=blank-at-eol,space-before-tab,-blank-at-eof
+*.h whitespace=blank-at-eol,space-before-tab,-blank-at-eof

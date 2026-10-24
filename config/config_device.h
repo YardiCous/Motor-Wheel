@@ -1,35 +1,20 @@
-﻿/*
- *----------------------------------------------------------------------
- *    Device Driver for μT-Kernel 3.00.05
- *
- *    Copyright (C) 2020-2021 by Ken Sakamura.
- *    This software is distributed under the T-License 2.2.
- *----------------------------------------------------------------------
- *
- *    Released by TRON Forum(http://www.tron.org) at 2021/11.
- *
- *----------------------------------------------------------------------
+/** @file config_device.h
+ * @brief Device allocation for the CSC20 application.
+ * Copyright (C) 2020-2021 by Ken Sakamura.
+ * This software is distributed under the T-License 2.2.
  */
+#ifndef CONFIG_DEVICE_H
+#define CONFIG_DEVICE_H
 
+#define DEVCNF_USE_SER 1
 
-/*
- *	config_device.h
- *	Device configuration definition
- */
+/* The line task owns ADC directly through board_io. */
+#define DEVCNF_USE_ADC 0
 
-#ifndef	__DEV_CONFIG_H__
-#define	__DEV_CONFIG_H__
+/* The terrain task owns I2C1 directly through board_io. */
+#define DEVCNF_USE_IIC 0
 
-/* ------------------------------------------------------------------------ */
-/* Device usage settings
- *	1: Use   0: Do not use
- */
+#endif /* CONFIG_DEVICE_H */
 
-#define DEVCNF_USE_SER		1		// Serial communication device 
-#define DEVCNF_USE_ADC		1		// A/D conversion device
-#define DEVCNF_USE_IIC		0		// I2C communication device
-		/* Off by default so no pins are claimed at boot.  To use I2C,
-		   set this to 1 and choose the pins in
-		   device/i2c/sysdepend/rp2040/i2c_cnf_sysdep.h. */
+/*** End of file. ***/
 
-#endif	/* __DEV_CONFIG_H__ */

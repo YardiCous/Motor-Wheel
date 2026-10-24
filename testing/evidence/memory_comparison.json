@@ -1,0 +1,43 @@
+{
+  "compiler": "arm-none-eabi-gcc (15:14.2.rel1-1) 14.2.1 20241119",
+  "method": "same fields; baseline uses one uint32_t per logical field",
+  "rows": [
+    {
+      "type": "telemetry_t",
+      "wide_bytes": 16,
+      "packed_bytes": 4
+    },
+    {
+      "type": "motion_t",
+      "wide_bytes": 80,
+      "packed_bytes": 36
+    },
+    {
+      "type": "line_t",
+      "wide_bytes": 76,
+      "packed_bytes": 20
+    },
+    {
+      "type": "safety_t",
+      "wide_bytes": 12,
+      "packed_bytes": 4
+    },
+    {
+      "type": "terrain_t",
+      "wide_bytes": 80,
+      "packed_bytes": 20
+    },
+    {
+      "type": "navigation_t",
+      "wide_bytes": 60,
+      "packed_bytes": 12
+    },
+    {
+      "type": "obstacle_t",
+      "wide_bytes": 48,
+      "packed_bytes": 8
+    }
+  ],
+  "wide_total": 372,
+  "packed_total": 104
+}

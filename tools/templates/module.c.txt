@@ -1,0 +1,12 @@
+/** @file module.c
+ * @brief Describe the controlled entity and reference its design document.
+ */
+#include "module.h"
+
+/** @brief Initialize the entity before any consumer runs. */
+bool module_init (void)
+{
+    return true;
+}
+
+/*** End of file. ***/

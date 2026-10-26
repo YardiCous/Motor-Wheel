@@ -12,9 +12,16 @@
 #define MOTION_POSITION_MOD_UM 4096000
 #define MOTION_MAX_EDGES 64u
 #define MOTION_DUTY_MAX 1000
+#define MOTION_DUTY_MIN 350
+#define MOTION_DUTY_STEP 80
 #define MOTION_INTEGRAL_MAX 16000
 
 static int32_t limit(int32_t value, int32_t lower, int32_t upper);
+static int16_t smooth_pwm(int16_t requested, int32_t target,
+                          int16_t previous);
+static int16_t control_pwm(int32_t target, int32_t measured,
+                           uint32_t * p_integral, uint32_t * p_previous,
+                           int16_t previous_pwm);
 static int16_t wheel_pid(int32_t target, int32_t measured,
                          uint32_t * p_integral, uint32_t * p_previous);
 static void update_distance(motion_t * p_motion, int32_t left, int32_t right);
@@ -31,6 +38,8 @@ void motion_init (motion_t * p_motion, uint32_t left, uint32_t right)
     p_motion->integral_right = MOTION_INTEGRAL_MAX;
     p_motion->prior_left     = 1000u;
     p_motion->prior_right    = 1000u;
+    p_motion->pwm_left       = 0;
+    p_motion->pwm_right      = 0;
     p_motion->remainder      = ROBOT_ENCODER_EDGES_TURN - 1u;
 }
 
@@ -46,6 +55,44 @@ bool motion_command (uint32_t * p_word, uint8_t mode, uint16_t distance,
         uint32_t reverse = b_reverse ? 1u : 0u;
         *p_word          = mode | ((uint32_t)distance << 2u) |
                            ((uint32_t)speed << 14u) | (reverse << 23u);
+    }
+
+    return b_valid;
+}
+
+/** @brief Keep common manoeuvre construction out of callers. */
+bool motion_forward (uint32_t * p_word, uint16_t distance, uint16_t speed)
+{
+    return motion_command(p_word, MOTION_MOVE, distance, speed, false);
+}
+
+/** @brief Reverse uses the same closed-loop distance accounting as forward. */
+bool motion_backward (uint32_t * p_word, uint16_t distance, uint16_t speed)
+{
+    return motion_command(p_word, MOTION_MOVE, distance, speed, true);
+}
+
+/** @brief Positive left-wheel travel and negative right-wheel travel turns
+ * the chassis right; invert both signs for a left turn. */
+bool motion_turn_left (uint32_t * p_word, uint16_t distance, uint16_t speed)
+{
+    return motion_command(p_word, MOTION_TURN, distance, speed, true);
+}
+
+/** @brief A right turn drives the wheels in opposite directions. */
+bool motion_turn_right (uint32_t * p_word, uint16_t distance, uint16_t speed)
+{
+    return motion_command(p_word, MOTION_TURN, distance, speed, false);
+}
+
+/** @brief Zero is the reserved stop command and has no stale payload. */
+bool motion_stop (uint32_t * p_word)
+{
+    bool b_valid = (NULL != p_word);
+
+    if (b_valid)
+    {
+        *p_word = 0u;
     }
 
     return b_valid;
@@ -79,8 +126,14 @@ bool motion_accept (motion_t * p_motion, uint32_t command)
         p_motion->progress_um    = 0u;
         p_motion->elapsed_ms     = 0u;
         p_motion->b_done         = false;
+        p_motion->b_stall        = false;
+        p_motion->b_timeout      = false;
         p_motion->stall_left_ms  = 0u;
         p_motion->stall_right_ms = 0u;
+        p_motion->integral_left  = MOTION_INTEGRAL_MAX;
+        p_motion->integral_right = MOTION_INTEGRAL_MAX;
+        p_motion->prior_left     = 1000u;
+        p_motion->prior_right    = 1000u;
     }
     else
     {
@@ -188,10 +241,13 @@ void motion_step (motion_t * p_motion, uint32_t left, uint32_t right,
         uint32_t integral_right = p_motion->integral_right;
         uint32_t prior_left     = p_motion->prior_left;
         uint32_t prior_right    = p_motion->prior_right;
-        *p_left_pwm =
-            wheel_pid(target_left, measured_left, &integral_left, &prior_left);
-        *p_right_pwm = wheel_pid(target_right, measured_right, &integral_right,
-                                 &prior_right);
+        *p_left_pwm = control_pwm(target_left, measured_left, &integral_left,
+                                  &prior_left, p_motion->pwm_left);
+        *p_right_pwm = control_pwm(target_right, measured_right,
+                                   &integral_right, &prior_right,
+                                   p_motion->pwm_right);
+        p_motion->pwm_left  = *p_left_pwm;
+        p_motion->pwm_right = *p_right_pwm;
         p_motion->integral_left  = integral_left;
         p_motion->integral_right = integral_right;
         p_motion->prior_left     = prior_left;
@@ -209,6 +265,8 @@ void motion_step (motion_t * p_motion, uint32_t left, uint32_t right,
         p_motion->mode   = p_motion->b_stall ? MOTION_STALL : MOTION_IDLE;
         *p_left_pwm      = 0;
         *p_right_pwm     = 0;
+        p_motion->pwm_left  = 0;
+        p_motion->pwm_right = 0;
     }
 }
 
@@ -233,6 +291,7 @@ static int32_t limit (int32_t value, int32_t lower, int32_t upper)
     {
         result = lower;
     }
+
     else if (value > upper)
     {
         result = upper;
@@ -243,6 +302,67 @@ static int32_t limit (int32_t value, int32_t lower, int32_t upper)
     }
 
     return result;
+}
+
+/** @brief Keep a commanded wheel above static friction and ramp changes. */
+static int16_t smooth_pwm (int16_t requested, int32_t target,
+                           int16_t previous)
+{
+    int32_t desired = requested;
+    int32_t magnitude;
+    int32_t prior = previous;
+    int32_t delta;
+
+    if (0 == target)
+    {
+        return 0;
+    }
+
+    magnitude = (desired < 0) ? -desired : desired;
+    if ((0 == prior) && (magnitude < MOTION_DUTY_MIN) &&
+        ((0 == desired) || ((desired > 0) == (target > 0))))
+    {
+        magnitude = MOTION_DUTY_MIN;
+        desired = (target < 0) ? -magnitude : magnitude;
+    }
+    desired = limit(desired, -MOTION_DUTY_MAX, MOTION_DUTY_MAX);
+    if (((prior < 0) && (desired > 0)) ||
+        ((prior > 0) && (desired < 0)))
+    {
+        if (prior > MOTION_DUTY_STEP)
+        {
+            return (int16_t)(prior - MOTION_DUTY_STEP);
+        }
+        if (prior < -MOTION_DUTY_STEP)
+        {
+            return (int16_t)(prior + MOTION_DUTY_STEP);
+        }
+        return 0;
+    }
+    delta = desired - prior;
+    if (delta > MOTION_DUTY_STEP)
+    {
+        desired = prior + MOTION_DUTY_STEP;
+    }
+    else if (delta < -MOTION_DUTY_STEP)
+    {
+        desired = prior - MOTION_DUTY_STEP;
+    }
+    else
+    {
+        /* The requested duty is already within one control step. */
+    }
+
+    return (int16_t)desired;
+}
+
+/** @brief Apply PID control, static-friction compensation and ramp limiting. */
+static int16_t control_pwm (int32_t target, int32_t measured,
+                            uint32_t * p_integral, uint32_t * p_previous,
+                            int16_t previous_pwm)
+{
+    int16_t requested = wheel_pid(target, measured, p_integral, p_previous);
+    return smooth_pwm(requested, target, previous_pwm);
 }
 
 /** @brief Gains are provisional and require the NFR2 bench tuning test. */

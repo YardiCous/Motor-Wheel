@@ -64,7 +64,8 @@ and the units for biased fields are described below and in the headers.
 | board_io / capture_t | `echo_state` | 0..3 | 2 | unsigned bit-field |
 | board_io / capture_t | `last_left` | 0..3 | 2 | unsigned bit-field |
 | board_io / capture_t | `last_right` | 0..3 | 2 | unsigned bit-field |
-| board_io / capture_t | `b_encoder_fault` | 0..1 | 1 | bool bit-field |
+| board_io / capture_t | `b_left_encoder_fault` | 0..1 | 1 | bool bit-field |
+| board_io / capture_t | `b_right_encoder_fault` | 0..1 | 1 | bool bit-field |
 | board_io / capture_t | `left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / capture_t | `right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / capture_t | `rise_us` | 0..4294967295 | 32 | 32-bit modulo counter/time |
@@ -95,6 +96,10 @@ and the units for biased fields are described below and in the headers.
 | telemetry / telemetry_t | `received` | 0..1 | 1 | unsigned bit-field |
 | telemetry / telemetry_t | `b_bad` | 0..1 | 1 | bool bit-field |
 | telemetry / telemetry_t | `b_complete` | 0..1 | 1 | bool bit-field |
+| encoder_test / encoder_test_t | `b_running` | 0..1 | 1 | bool bit-field |
+| encoder_test / encoder_test_t | `last_report_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| encoder_test / encoder_test_t | `last_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| encoder_test / encoder_test_t | `last_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | motion / motion_t | `position_um` | 0..4095999 | 22 | unsigned bit-field |
 | motion / motion_t | `mode` | 0..6 | 3 | unsigned bit-field |
 | motion / motion_t | `b_reverse` | 0..1 | 1 | bool bit-field |
@@ -115,6 +120,7 @@ and the units for biased fields are described below and in the headers.
 | motion / motion_t | `remainder` | 0..1918 | 11 | unsigned bit-field |
 | motion / motion_t | `last_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | motion / motion_t | `last_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| physical_test / physical_test_t | `pause_until_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | line / line_t | `state` | 0..5 | 3 | unsigned bit-field |
 | line / line_t | `error` | 0..254 | 8 | unsigned bit-field |
 | line / line_t | `barcode` | 0..3 | 2 | unsigned bit-field |

@@ -3,6 +3,7 @@ from pathlib import Path
 import argparse
 import os
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,7 @@ def build(root, executable, sanitize=True):
     if sanitize:
         command += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
     command += [str(root / "testing/host/verify_main.c")]
+    command += [str(root / "testing/host/motor_test.c")]
     command += [str(root / "app_program" / source) for source in CORE]
     command += ["-o", str(executable)]
     subprocess.run(command, check=True)
@@ -37,7 +39,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    subprocess.run(["python3", str(ROOT / "tools/check_barr.py")], check=True)
+    subprocess.run([sys.executable, str(ROOT / "tools/check_barr.py")], check=True)
     with tempfile.TemporaryDirectory(prefix="motor-test-") as temporary:
         executable = Path(temporary) / "verify"
         build(ROOT, executable)

@@ -35,6 +35,10 @@ Read the kernel's modulo-2^32 millisecond clock.
 
 Snapshot both 32-bit modulo encoder counters and edge validity.
 
+`uint8_t board_io_encoder_faults(void);`
+
+Return latched invalid-transition bits: bit 0 left, bit 1 right.
+
 `void board_io_clear_fault(void);`
 
 Clear an encoder diagnostic only while motor drive is inhibited.
@@ -160,6 +164,16 @@ typedef struct
 
 Preserve binary bytes; reject truncation, overrun and extra fragments.
 
+## app_program/subsystem2/encoder_test.h
+
+`void encoder_test_init(encoder_test_t * p_test);`
+
+Initialize the motor-off encoder diagnostic.
+
+`void encoder_test_step(encoder_test_t * p_test);`
+
+Print encoder snapshots while the operator rotates the wheels.
+
 ## app_program/subsystem2/motion.h
 
 `void motion_init(motion_t * p_motion, uint32_t left, uint32_t right);`
@@ -187,6 +201,8 @@ typedef struct
     uint32_t prior_left : 11;
     uint32_t prior_right : 11;
     uint32_t remainder : 11;
+    int16_t  pwm_left;
+    int16_t  pwm_right;
 } motion_t;
 
 /** @brief Reset while stopped, anchoring both encoder snapshots.
@@ -194,6 +210,26 @@ typedef struct
 `bool motion_command(uint32_t * p_word, uint8_t mode, uint16_t distance, uint16_t speed, bool b_reverse);`
 
 Build a 24-bit command with checked physical ranges.
+
+`bool motion_forward(uint32_t * p_word, uint16_t distance, uint16_t speed);`
+
+Build a forward, encoder-controlled straight move command.
+
+`bool motion_backward(uint32_t * p_word, uint16_t distance, uint16_t speed);`
+
+Build a reverse, encoder-controlled straight move command.
+
+`bool motion_turn_left(uint32_t * p_word, uint16_t distance, uint16_t speed);`
+
+Build a left-in-place turn command.
+
+`bool motion_turn_right(uint32_t * p_word, uint16_t distance, uint16_t speed);`
+
+Build a right-in-place turn command.
+
+`bool motion_stop(uint32_t * p_word);`
+
+Build the command that stops the controller immediately.
 
 `bool motion_accept(motion_t * p_motion, uint32_t command);`
 
@@ -210,6 +246,16 @@ Publish one whole 32-bit snapshot, never bit-field writes.
 `int32_t motion_edge_delta(uint32_t newer, uint32_t older, bool * pb_valid);`
 
 Return signed modulo-2^32 edge displacement, with a 64-edge guard.
+
+## app_program/subsystem2/physical_test.h
+
+`void physical_test_init(physical_test_t * p_test);`
+
+Initialize the test in a motor-off state.
+
+`void physical_test_step(physical_test_t * p_test, motion_t * p_motion, int16_t * p_left_pwm, int16_t * p_right_pwm);`
+
+Run one 10-ms test cycle and return the requested PWM values.
 
 ## app_program/subsystem3/line.h
 
@@ -385,6 +431,12 @@ Enforce a five-second whole-scan deadline.
 `uint16_t obstacle_median(uint16_t first, uint16_t second, uint16_t third);`
 
 Return an outlier-resistant median without adding readings.
+
+## testing/host/motor_test.h
+
+`void motor_test_run(void);`
+
+Validate the operator movement sequence without energizing hardware.
 
 ## testing/host/verify_main.h
 

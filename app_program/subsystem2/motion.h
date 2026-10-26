@@ -38,6 +38,8 @@ typedef struct
     uint32_t prior_left : 11;
     uint32_t prior_right : 11;
     uint32_t remainder : 11;
+    int16_t  pwm_left;
+    int16_t  pwm_right;
 } motion_t;
 
 /** @brief Reset while stopped, anchoring both encoder snapshots. */
@@ -45,6 +47,16 @@ void motion_init(motion_t * p_motion, uint32_t left, uint32_t right);
 /** @brief Build a 24-bit command with checked physical ranges. */
 bool motion_command(uint32_t * p_word, uint8_t mode, uint16_t distance,
                     uint16_t speed, bool b_reverse);
+/** @brief Build a forward, encoder-controlled straight move command. */
+bool motion_forward(uint32_t * p_word, uint16_t distance, uint16_t speed);
+/** @brief Build a reverse, encoder-controlled straight move command. */
+bool motion_backward(uint32_t * p_word, uint16_t distance, uint16_t speed);
+/** @brief Build a left-in-place turn command. */
+bool motion_turn_left(uint32_t * p_word, uint16_t distance, uint16_t speed);
+/** @brief Build a right-in-place turn command. */
+bool motion_turn_right(uint32_t * p_word, uint16_t distance, uint16_t speed);
+/** @brief Build the command that stops the controller immediately. */
+bool motion_stop(uint32_t * p_word);
 /** @brief STOP overrides all states; manoeuvres preempt FOLLOW only. */
 bool motion_accept(motion_t * p_motion, uint32_t command);
 /** @brief Run one 10-ms cycle and produce bounded duty values -1000..1000. */

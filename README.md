@@ -28,6 +28,12 @@ make -C build_make -j8 NET=lwip MQTT=1 TEST=1
 
 # Single-core qualification uses the same application and synchronization:
 make -C build_make -j8 SMP=0 NET=lwip MQTT=1
+
+# Opt-in low-speed physical motor sequence (no autonomous navigation):
+make -C build_make -j8 MOTOR_TEST=1 WIFI=none NET=none
+
+# Motor-off quadrature encoder diagnostic:
+make -C build_make -j8 ENCODER_TEST=1 WIFI=none NET=none
 ```
 
 For example, the MQTT build produces
@@ -37,6 +43,26 @@ Hold BOOTSEL while connecting USB and copy that UF2 onto RPI-RP2.
 GP0/GP1 belong to ultrasonic ranging: use USB console and `CRASH_REPORT=0`.
 The hardware driver rejects UART-console builds that would claim those pins.
 WiFi connection failure does not prevent offline startup or local controls.
+
+### Physical motor test
+
+Build with `MOTOR_TEST=1` only for a bench test. The resulting image keeps the
+motors off until the local START switch is pressed, then runs a
+200-mm forward move, stop, 200-mm reverse move, stop, left turn, stop, right
+turn, and stop. Each movement is encoder-controlled at 150 mm/s and stops
+after the target encoder distance. It prints phase messages on the USB console
+and stops on an encoder stall or the active-low E-stop on GP21. Keep the wheels
+lifted for the first run, release START before boot, and keep the E-stop
+accessible. RESET on GP22 returns the test to its armed, motor-off state.
+
+This mode is intentionally separate from the normal autonomous firmware and
+must not be used while the robot is on a course. A successful console sequence
+ends with `PHYSICAL MOTOR TEST: PASS - all phases complete`.
+
+For encoder diagnosis, build with `ENCODER_TEST=1`. This mode disables motor
+outputs and reports cumulative left/right counts and deltas every 250 ms after
+START. Rotate each wheel slowly by hand and look for changing counts with
+`valid=1`.
 
 ## Wiring and operating assumptions
 

@@ -87,6 +87,24 @@ TEST ?= 0
 ifneq ($(filter $(TEST),0 1),$(TEST))
 $(error Unknown TEST '$(TEST)'; use 0 or 1)
 endif
+
+# MOTOR_TEST=1 builds the opt-in, low-speed physical motor sequence.
+MOTOR_TEST ?= 0
+ifneq ($(filter $(MOTOR_TEST),0 1),$(MOTOR_TEST))
+$(error Unknown MOTOR_TEST '$(MOTOR_TEST)'; use 0 or 1)
+endif
+
+# ENCODER_TEST=1 builds the motor-off quadrature diagnostic.
+ENCODER_TEST ?= 0
+ifneq ($(filter $(ENCODER_TEST),0 1),$(ENCODER_TEST))
+$(error Unknown ENCODER_TEST '$(ENCODER_TEST)'; use 0 or 1)
+endif
+ifeq ($(ENCODER_TEST),1)
+ENCODER_TEST_SUFFIX := _encodertest
+endif
+ifeq ($(MOTOR_TEST),1)
+MOTOR_TEST_SUFFIX := _motortest
+endif
 ifeq ($(TEST),1)
 TEST_SUFFIX := _test
 endif
@@ -116,7 +134,7 @@ endif
 # a live hazard: an SMP=1 build was once flashed in place of an SMP=0 one and
 # only the banner in the log revealed it.
 #
-EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)
+EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)$(MOTOR_TEST_SUFFIX)$(ENCODER_TEST_SUFFIX)
 
 GCC := arm-none-eabi-gcc
 AS := arm-none-eabi-gcc
@@ -176,7 +194,7 @@ ifeq ($(SMP),1)
 CFLAGS  += -DCNF_SMP=1
 ASFLAGS += -DCNF_SMP=1
 endif
-CFLAGS  += -DAPP_TEST=$(TEST)
+CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST)
 CFLAGS  += -DTM_CONSOLE_UART=$(CRASH_REPORT)
 ifeq ($(CRASH_REPORT),0)
 CFLAGS  += -DBOARD_UART0_FREE=1

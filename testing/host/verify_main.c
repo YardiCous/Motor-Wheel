@@ -2,6 +2,7 @@
  * @brief Behavioral verification for packed and widened reference builds.
  */
 #include "verify_main.h"
+#include "motor_test.h"
 
 #include "../../app_program/data_formats.h"
 #include "../../app_program/robot_config.h"
@@ -56,6 +57,7 @@ int main (void)
     verify_fields();
     verify_vector();
     verify_motion();
+    motor_test_run();
     verify_safety();
     verify_terrain();
     verify_line();
@@ -179,6 +181,18 @@ static void verify_motion (void)
     assert(0u != controller.b_done);
     assert(controller.position_um >= 1000000u);
     assert(controller.position_um < 1010000u);
+    controller.integral_left  = 0u;
+    controller.integral_right = 0u;
+    controller.prior_left     = 0u;
+    controller.prior_right    = 0u;
+    assert(motion_command(&command, MOTION_MOVE, 100u, 250u, true));
+    assert(motion_accept(&controller, command));
+    assert(controller.integral_left == 16000u);
+    assert(controller.integral_right == 16000u);
+    assert(controller.prior_left == 1000u);
+    assert(controller.prior_right == 1000u);
+    assert(controller.pwm_left == 0);
+    assert(controller.pwm_right == 0);
     motion_init(&controller, UINT32_MAX - 2u, UINT32_MAX - 2u);
     assert(motion_command(&command, MOTION_TURN, 110u, 150u, false));
     assert(motion_accept(&controller, command));

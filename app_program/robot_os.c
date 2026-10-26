@@ -12,6 +12,12 @@
 #include "selftest.h"
 #endif /* APP_TEST */
 #include "subsystem2/motion.h"
+#if MOTOR_TEST
+#include "subsystem2/physical_test.h"
+#endif /* MOTOR_TEST */
+#if ENCODER_TEST
+#include "subsystem2/encoder_test.h"
+#endif /* ENCODER_TEST */
 #include "subsystem3/line.h"
 #include "subsystem4/safety.h"
 #include "subsystem4/terrain.h"
@@ -74,7 +80,9 @@ typedef struct
 } buttons_t;
 
 static volatile cyclic_t g_clock                                = {0};
+#if ((!MOTOR_TEST) && (!ENCODER_TEST))
 static buttons_t         g_buttons                              = {0};
+#endif /* MOTOR_TEST && ENCODER_TEST */
 static volatile shared_t g_shared                               = {0};
 static volatile uint8_t  g_packet[DATA_FORMATS_TELEMETRY_BYTES] = {0u};
 static volatile uint8_t  g_sources[9]                           = {0u};
@@ -105,13 +113,17 @@ static void     terrain_task(INT start, void * p_argument);
 static void     navigation_task(INT start, void * p_argument);
 static void     obstacle_task(INT start, void * p_argument);
 static void     telemetry_task(INT start, void * p_argument);
+#if ((!MOTOR_TEST) && (!ENCODER_TEST))
 static void     motion_cycle(motion_t * p_motion);
+#endif /* MOTOR_TEST && ENCODER_TEST */
 static void     line_cycle(line_t * p_line);
 static void     terrain_cycle(terrain_t * p_terrain, bool * pb_configured);
+#if ((!MOTOR_TEST) && (!ENCODER_TEST))
 static void     navigation_cycle(navigation_t * p_navigation);
 static void     local_commands(navigation_t * p_navigation);
 static void     remote_commands(navigation_t * p_navigation);
 static void     dispatch_navigation(navigation_t * p_navigation);
+#endif /* MOTOR_TEST && ENCODER_TEST */
 static void     obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle);
 static bool     range_sample(uint16_t * p_range);
 static uint16_t current_faults(void);
@@ -418,11 +430,37 @@ static void motion_task (INT start, void * p_argument)
 {
     (void)start;
     (void)p_argument;
+#if !ENCODER_TEST
     motion_t controller = {0};
     uint32_t left       = 0u;
     uint32_t right      = 0u;
     (void)board_io_encoders(&left, &right);
     motion_init(&controller, left, right);
+#endif /* ENCODER_TEST */
+#if MOTOR_TEST
+    physical_test_t physical_test = {0};
+    physical_test_init(&physical_test);
+
+    for (;;)
+    {
+        wait_release();
+        board_io_trace(true);
+        int16_t left_pwm  = 0;
+        int16_t right_pwm = 0;
+        physical_test_step(&physical_test, &controller, &left_pwm, &right_pwm);
+        board_io_motor(left_pwm, right_pwm);
+        board_io_trace(false);
+    }
+#elif ENCODER_TEST
+    encoder_test_t encoder_test = {0};
+    encoder_test_init(&encoder_test);
+
+    for (;;)
+    {
+        wait_release();
+        encoder_test_step(&encoder_test);
+    }
+#else
 
     for (;;)
     {
@@ -431,6 +469,7 @@ static void motion_task (INT start, void * p_argument)
         motion_cycle(&controller);
         board_io_trace(false);
     }
+#endif /* MOTOR_TEST */
 }
 
 /** @brief The single ADC owner handles tracking and barcode perception. */
@@ -469,6 +508,19 @@ static void navigation_task (INT start, void * p_argument)
 {
     (void)start;
     (void)p_argument;
+#if MOTOR_TEST
+    for (;;)
+    {
+        wait_release();
+        heartbeat(3u);
+    }
+#elif ENCODER_TEST
+    for (;;)
+    {
+        wait_release();
+        heartbeat(3u);
+    }
+#else
     navigation_t manager = {0};
     navigation_init(&manager);
 
@@ -482,6 +534,7 @@ static void navigation_task (INT start, void * p_argument)
         field_write(2u, 3u, manager.state);
         heartbeat(3u);
     }
+#endif /* MOTOR_TEST */
 }
 
 /** @brief Ranging waits on the echo flag, freeing the CPU between edges. */
@@ -538,6 +591,7 @@ static void telemetry_task (INT start, void * p_argument)
     }
 }
 
+#if ((!MOTOR_TEST) && (!ENCODER_TEST))
 /** @brief Stop/reset is processed before accepting another movement. */
 static void motion_cycle (motion_t * p_motion)
 {
@@ -638,6 +692,8 @@ static void motion_cycle (motion_t * p_motion)
         (void)tk_wup_tsk(gh_tasks[0]);
     }
 }
+
+#endif /* MOTOR_TEST && ENCODER_TEST */
 
 /** @brief Line errors and full-resolution sensor samples have one writer. */
 static void line_cycle (line_t * p_line)
@@ -756,6 +812,7 @@ static void terrain_cycle (terrain_t * p_terrain, bool * pb_configured)
     }
 }
 
+#if ((!MOTOR_TEST) && (!ENCODER_TEST))
 /** @brief Latest line data is combined with consumptive motion events. */
 static void navigation_cycle (navigation_t * p_navigation)
 {
@@ -954,6 +1011,7 @@ static void dispatch_navigation (navigation_t * p_navigation)
 
     board_io_unlock(mask);
 }
+#endif /* MOTOR_TEST && ENCODER_TEST */
 
 /** @brief The scan task is the only consumer of the echo flag. */
 static void obstacle_cycle (obstacle_t * p_obstacle, uint8_t * p_angle)

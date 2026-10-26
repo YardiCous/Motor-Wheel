@@ -21,6 +21,8 @@ uint32_t board_io_time_us(void);
 uint32_t board_io_time_ms(void);
 /** @brief Snapshot both 32-bit modulo encoder counters and edge validity. */
 bool board_io_encoders(uint32_t * p_left, uint32_t * p_right);
+/** @brief Return latched invalid-transition bits: bit 0 left, bit 1 right. */
+uint8_t board_io_encoder_faults(void);
 /** @brief Clear an encoder diagnostic only while motor drive is inhibited. */
 void board_io_clear_fault(void);
 /** @brief Only the Motion task calls this after startup. */

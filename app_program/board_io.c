@@ -48,7 +48,8 @@ typedef struct
     uint32_t echo_state : 2;
     uint32_t last_left : 2;
     uint32_t last_right : 2;
-    bool     b_encoder_fault : 1;
+    bool     b_left_encoder_fault : 1;
+    bool     b_right_encoder_fault : 1;
 } capture_t;
 
 static volatile capture_t g_capture        = {0};
@@ -173,16 +174,27 @@ bool board_io_encoders (uint32_t * p_left, uint32_t * p_right)
     uint32_t mask = board_io_lock();
     *p_left       = g_capture.left;
     *p_right      = g_capture.right;
-    bool b_valid  = !g_capture.b_encoder_fault;
+    bool b_valid = (!g_capture.b_left_encoder_fault) &&
+                   (!g_capture.b_right_encoder_fault);
     board_io_unlock(mask);
     return b_valid;
+}
+
+uint8_t board_io_encoder_faults (void)
+{
+    uint32_t mask = board_io_lock();
+    uint8_t faults = (g_capture.b_left_encoder_fault ? 1u : 0u) |
+                     (g_capture.b_right_encoder_fault ? 2u : 0u);
+    board_io_unlock(mask);
+    return faults;
 }
 
 /** @brief Reset is acknowledged only with the safety latch still asserted. */
 void board_io_clear_fault (void)
 {
     uint32_t mask             = board_io_lock();
-    g_capture.b_encoder_fault = false;
+    g_capture.b_left_encoder_fault  = false;
+    g_capture.b_right_encoder_fault = false;
     board_io_unlock(mask);
 }
 
@@ -419,8 +431,17 @@ static void encoder_edge (uint32_t inputs, bool b_left)
     uint32_t current  = (inputs >> (b_left ? 4u : 16u)) & 3u;
     int32_t  step     = g_quadrature[(previous << 2u) | current];
     step *= b_left ? ROBOT_ENCODER_LEFT_SIGN : ROBOT_ENCODER_RIGHT_SIGN;
-    g_capture.b_encoder_fault =
-        (g_capture.b_encoder_fault) || ((3u == (previous ^ current)));
+    if (3u == (previous ^ current))
+    {
+        if (b_left)
+        {
+            g_capture.b_left_encoder_fault = true;
+        }
+        else
+        {
+            g_capture.b_right_encoder_fault = true;
+        }
+    }
 
     if (b_left)
     {
@@ -440,12 +461,13 @@ static void encoder_edge (uint32_t inputs, bool b_left)
 static void board_gpio_isr (uint32_t number)
 {
     (void)number;
-    uint32_t inputs = read_reg(BOARD_SIO + 4u);
     uint32_t first  = read_reg(BOARD_IO + 0x120u);
     uint32_t third  = read_reg(BOARD_IO + 0x128u);
+    uint32_t inputs = read_reg(BOARD_SIO + 4u);
     write_reg(BOARD_IO + 0xf0u, first);
     write_reg(BOARD_IO + 0xf8u, third);
 
+    /* Decode only after the event and pin snapshots are safely captured. */
     if (0u != (first & 0x00cc0000u))
     {
         encoder_edge(inputs, true);

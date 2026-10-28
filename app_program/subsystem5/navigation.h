@@ -24,6 +24,9 @@ typedef struct
     bool     b_estop : 1;
     uint32_t barcode : 2;
     uint32_t elapsed_ms : 14;
+    uint32_t look : 3;
+    uint32_t left_cm : 9;
+    uint32_t right_cm : 9;
     uint32_t command;
 } navigation_t;
 

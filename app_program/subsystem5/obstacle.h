@@ -15,6 +15,11 @@
 #define OBSTACLE_RECOVER 5u
 #define OBSTACLE_ABORT 6u
 
+/** @brief Minimum clear distance (cm) a side needs before a bypass is planned.
+ * Keep it above the box reading at the stop (about 40 cm), or a reading of
+ * the box itself can pass as clear. */
+#define OBSTACLE_CLEAR_CM 40u
+
 /** @brief The servo angle is represented in three-degree units. */
 typedef struct
 {

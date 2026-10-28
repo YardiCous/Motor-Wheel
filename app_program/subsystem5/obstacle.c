@@ -10,11 +10,23 @@
 #define OBSTACLE_COARSE_POINTS 5u
 #define OBSTACLE_FINE_POINTS 3u
 
-static const uint8_t g_coarse_angles[OBSTACLE_COARSE_POINTS] = {10u, 20u, 30u,
-                                                                40u, 50u};
+/* Servo angles are in 3-degree units, with 30 facing straight ahead.
+ * Coarse points are 2 units (6 degrees) apart, so they reach 12 degrees each
+ * way, and the fine pass adds one more unit: never beyond 15 degrees. */
+#define OBSTACLE_CENTRE 30u
+#define OBSTACLE_STEP 2u
+#define OBSTACLE_MAX_UNITS 5u
+
+_Static_assert(((OBSTACLE_STEP * 2u) + 1u) <= OBSTACLE_MAX_UNITS,
+               "servo sweep would exceed 15 degrees each way");
+
+static const uint8_t g_coarse_angles[OBSTACLE_COARSE_POINTS] = {
+    OBSTACLE_CENTRE - (OBSTACLE_STEP * 2u), OBSTACLE_CENTRE - OBSTACLE_STEP,
+    OBSTACLE_CENTRE, OBSTACLE_CENTRE + OBSTACLE_STEP,
+    OBSTACLE_CENTRE + (OBSTACLE_STEP * 2u)};
 
 /** @brief The centre servo index is 30, corresponding to 90 degrees. */
-void obstacle_init (obstacle_t * p_obstacle)
+void obstacle_init(obstacle_t * p_obstacle)
 {
     memset(p_obstacle, 0, sizeof(*p_obstacle));
     p_obstacle->angle    = 30u;
@@ -22,7 +34,7 @@ void obstacle_init (obstacle_t * p_obstacle)
 }
 
 /** @brief Start only after Navigation has stopped the motor controller. */
-bool obstacle_scan (obstacle_t * p_obstacle)
+bool obstacle_scan(obstacle_t * p_obstacle)
 {
     bool b_idle = (OBSTACLE_IDLE == p_obstacle->state);
 
@@ -37,7 +49,7 @@ bool obstacle_scan (obstacle_t * p_obstacle)
 }
 
 /** @brief Missing echoes are invalid measurements, never clear space. */
-void obstacle_sample (obstacle_t * p_obstacle, uint16_t range_cm, bool b_valid)
+void obstacle_sample(obstacle_t * p_obstacle, uint16_t range_cm, bool b_valid)
 {
     b_valid = b_valid && (range_cm >= 2u) && (range_cm <= ROBOT_RANGE_MAX_CM);
     p_obstacle->b_valid  = b_valid;
@@ -92,7 +104,7 @@ void obstacle_sample (obstacle_t * p_obstacle, uint16_t range_cm, bool b_valid)
         else
         {
             p_obstacle->b_left  = (p_obstacle->best_angle < 30u);
-            p_obstacle->b_ready = (p_obstacle->best_cm >= 70u);
+            p_obstacle->b_ready = (p_obstacle->best_cm >= OBSTACLE_CLEAR_CM);
             p_obstacle->state =
                 p_obstacle->b_ready ? OBSTACLE_PLAN : OBSTACLE_ABORT;
             p_obstacle->angle = 30u;
@@ -105,7 +117,7 @@ void obstacle_sample (obstacle_t * p_obstacle, uint16_t range_cm, bool b_valid)
 }
 
 /** @brief Deadline saturation also prevents the 13-bit timer wrapping. */
-void obstacle_tick (obstacle_t * p_obstacle, uint16_t elapsed_ms)
+void obstacle_tick(obstacle_t * p_obstacle, uint16_t elapsed_ms)
 {
     bool b_scanning = (OBSTACLE_COARSE == p_obstacle->state) ||
                       (OBSTACLE_FINE == p_obstacle->state);
@@ -125,7 +137,7 @@ void obstacle_tick (obstacle_t * p_obstacle, uint16_t elapsed_ms)
 }
 
 /** @brief Sorting comparisons keep the complete 0..400-cm precision. */
-uint16_t obstacle_median (uint16_t first, uint16_t second, uint16_t third)
+uint16_t obstacle_median(uint16_t first, uint16_t second, uint16_t third)
 {
     uint16_t temporary = 0u;
 

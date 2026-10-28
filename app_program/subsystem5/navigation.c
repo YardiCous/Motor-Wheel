@@ -6,23 +6,37 @@
 #include "../data_formats.h"
 #include "../robot_config.h"
 #include "../subsystem2/motion.h"
+#include "obstacle.h"
 
 #include <string.h>
 
 #define NAVIGATION_BYPASS_STAGES 8u
 #define NAVIGATION_QUARTER_ARC_MM ((ROBOT_TRACK_MM * 3142u) / 4000u)
+#define NAVIGATION_LOOK_ARC_MM (NAVIGATION_QUARTER_ARC_MM / 2u)
+#define NAVIGATION_LOOK_SETTLE_MS 400u
+
+/* BODY_SCAN=1 on the make line: without a working scan servo, the robot
+ * turns its whole body about 45 degrees each way to measure both sides. */
+#ifndef ROBOT_BODY_SCAN
+#define ROBOT_BODY_SCAN 0u
+#endif /* ROBOT_BODY_SCAN */
 
 static void issue(navigation_t * p_navigation, uint8_t mode, uint16_t distance,
                   uint16_t speed, bool b_reverse);
 static void step_bypass(navigation_t * p_navigation, bool b_done,
-                        bool b_line_valid, bool b_scan_ready,
-                        bool b_scan_left);
+                        bool b_line_valid, bool b_scan_ready, bool b_scan_left,
+                        uint16_t range_cm, bool b_range_valid);
+static void step_look(navigation_t * p_navigation, bool b_done,
+                      uint16_t range_cm, bool b_range_valid);
 static void step_follow(navigation_t * p_navigation, bool b_line_lost,
                         bool b_on_hump, uint16_t range_cm, bool b_range_valid,
                         bool b_barcode_zone);
+static void start_search(navigation_t * p_navigation, bool b_line_valid);
+static void step_search(navigation_t * p_navigation, bool b_done,
+                        bool b_line_valid);
 
 /** @brief No network state participates in boot readiness. */
-void navigation_init (navigation_t * p_navigation)
+void navigation_init(navigation_t * p_navigation)
 {
     memset(p_navigation, 0, sizeof(*p_navigation));
     p_navigation->state = DATA_FORMATS_IDLE;
@@ -30,7 +44,7 @@ void navigation_init (navigation_t * p_navigation)
 
 /** @brief STOP is valid in every state and flushes motion at the OS boundary.
  */
-bool navigation_supervise (navigation_t * p_navigation, uint8_t command,
+bool navigation_supervise(navigation_t * p_navigation, uint8_t command,
                           bool b_safety_latched)
 {
     bool b_accepted = false;
@@ -44,7 +58,7 @@ bool navigation_supervise (navigation_t * p_navigation, uint8_t command,
             p_navigation->b_waiting        = false;
             p_navigation->elapsed_ms       = 0u;
             b_accepted                     = true;
-        break;
+            break;
 
         case DATA_FORMATS_START:
             b_accepted = (DATA_FORMATS_IDLE == p_navigation->state) &&
@@ -57,31 +71,31 @@ bool navigation_supervise (navigation_t * p_navigation, uint8_t command,
                 issue(p_navigation, MOTION_FOLLOW, 0u, ROBOT_CRUISE_MM_SECOND,
                       false);
             }
-        break;
+            break;
 
         case DATA_FORMATS_RESET:
             b_accepted = (DATA_FORMATS_FAULT == p_navigation->state) ||
                          (DATA_FORMATS_IDLE == p_navigation->state);
             p_navigation->b_reset_requested = b_accepted;
-        break;
+            break;
 
         case DATA_FORMATS_ESTOP:
             p_navigation->b_estop          = true;
             p_navigation->b_stop_requested = true;
             p_navigation->state            = DATA_FORMATS_FAULT;
             b_accepted                     = true;
-        break;
+            break;
 
         default:
             /* Invalid supervisory commands cannot affect movement. */
-        break;
+            break;
     }
 
     return b_accepted;
 }
 
 /** @brief U-turn is implemented as twice the calibrated 90-degree arc. */
-void navigation_barcode (navigation_t * p_navigation, uint8_t barcode)
+void navigation_barcode(navigation_t * p_navigation, uint8_t barcode)
 {
     if ((DATA_FORMATS_FOLLOW == p_navigation->state) && (barcode <= 3u))
     {
@@ -102,7 +116,7 @@ void navigation_barcode (navigation_t * p_navigation, uint8_t barcode)
 }
 
 /** @brief Safety always wins over barcode completion or a pending bypass. */
-void navigation_step (navigation_t * p_navigation, uint8_t motion_mode,
+void navigation_step(navigation_t * p_navigation, uint8_t motion_mode,
                      bool b_done, bool b_line_valid, bool b_line_lost,
                      bool b_on_hump, uint16_t range_cm, bool b_range_valid,
                      bool b_scan_ready, bool b_scan_left, bool b_barcode_zone,
@@ -130,7 +144,7 @@ void navigation_step (navigation_t * p_navigation, uint8_t motion_mode,
         case DATA_FORMATS_HUMP:
             step_follow(p_navigation, b_line_lost, b_on_hump, range_cm,
                         b_range_valid, b_barcode_zone);
-        break;
+            break;
 
         case DATA_FORMATS_BARCODE:
             if (b_done && (MOTION_IDLE == motion_mode))
@@ -139,40 +153,20 @@ void navigation_step (navigation_t * p_navigation, uint8_t motion_mode,
                 issue(p_navigation, MOTION_FOLLOW, 0u,
                       ROBOT_CAUTIOUS_MM_SECOND, false);
             }
-        break;
+            break;
 
         case DATA_FORMATS_AVOID:
             step_bypass(p_navigation, b_done, b_line_valid, b_scan_ready,
-                        b_scan_left);
-        break;
+                        b_scan_left, range_cm, b_range_valid);
+            break;
 
         case DATA_FORMATS_SEARCH:
-            p_navigation->line_confirm =
-                b_line_valid ? ((p_navigation->line_confirm < 3u)
-                                    ? (p_navigation->line_confirm + 1u)
-                                    : 3u)
-                             : 0u;
-
-            if (p_navigation->line_confirm >= 3u)
-            {
-                p_navigation->b_stop_requested = true;
-                p_navigation->state            = DATA_FORMATS_FOLLOW;
-                issue(p_navigation, MOTION_FOLLOW, 0u,
-                      ROBOT_CAUTIOUS_MM_SECOND, false);
-            }
-            else if (p_navigation->elapsed_ms >= ROBOT_SEARCH_MS)
-            {
-                p_navigation->b_fault = true;
-            }
-            else
-            {
-                /* A bounded encoder-controlled turn searches for the line. */
-            }
-        break;
+            step_search(p_navigation, b_done, b_line_valid);
+            break;
 
         default:
             /* IDLE and FAULT generate no movement. */
-        break;
+            break;
     }
 
     if (p_navigation->elapsed_ms >= ROBOT_MANOEUVRE_MS)
@@ -182,7 +176,7 @@ void navigation_step (navigation_t * p_navigation, uint8_t motion_mode,
 }
 
 /** @brief Queue overflow is handled by the RTOS boundary as a fatal fault. */
-static void issue (navigation_t * p_navigation, uint8_t mode, uint16_t distance,
+static void issue(navigation_t * p_navigation, uint8_t mode, uint16_t distance,
                   uint16_t speed, bool b_reverse)
 {
     p_navigation->b_command_ready = motion_command(
@@ -190,10 +184,15 @@ static void issue (navigation_t * p_navigation, uint8_t mode, uint16_t distance,
 }
 
 /** @brief Three straight legs plus turns return beside the original line. */
-static void step_bypass (navigation_t * p_navigation, bool b_done,
-                        bool b_line_valid, bool b_scan_ready, bool b_scan_left)
+static void step_bypass(navigation_t * p_navigation, bool b_done,
+                        bool b_line_valid, bool b_scan_ready, bool b_scan_left,
+                        uint16_t range_cm, bool b_range_valid)
 {
-    if ((0u == p_navigation->stage) && b_scan_ready)
+    if ((0u == p_navigation->stage) && (0u != ROBOT_BODY_SCAN))
+    {
+        step_look(p_navigation, b_done, range_cm, b_range_valid);
+    }
+    else if ((0u == p_navigation->stage) && b_scan_ready)
     {
         p_navigation->b_left     = b_scan_left;
         p_navigation->stage      = 1u;
@@ -227,16 +226,12 @@ static void step_bypass (navigation_t * p_navigation, bool b_done,
 
     if (stage >= NAVIGATION_BYPASS_STAGES)
     {
-        p_navigation->state        = DATA_FORMATS_SEARCH;
-        p_navigation->elapsed_ms   = 0u;
-        p_navigation->line_confirm = b_line_valid ? 1u : 0u;
-        issue(p_navigation, MOTION_TURN, NAVIGATION_QUARTER_ARC_MM,
-              ROBOT_TURN_MM_SECOND, true);
+        start_search(p_navigation, b_line_valid);
     }
 }
 
 /** @brief The robot slows before entering an obstacle or hump zone. */
-static void step_follow (navigation_t * p_navigation, bool b_line_lost,
+static void step_follow(navigation_t * p_navigation, bool b_line_lost,
                         bool b_on_hump, uint16_t range_cm, bool b_range_valid,
                         bool b_barcode_zone)
 {
@@ -254,17 +249,17 @@ static void step_follow (navigation_t * p_navigation, bool b_line_lost,
     {
         p_navigation->state            = DATA_FORMATS_AVOID;
         p_navigation->b_stop_requested = true;
-        p_navigation->b_scan_requested = true;
+        p_navigation->b_scan_requested = (0u == ROBOT_BODY_SCAN);
         p_navigation->stage            = 0u;
         p_navigation->elapsed_ms       = 0u;
         p_navigation->b_waiting        = false;
+        p_navigation->look             = 0u;
+        p_navigation->left_cm          = 0u;
+        p_navigation->right_cm         = 0u;
     }
     else if (b_line_lost)
     {
-        p_navigation->state      = DATA_FORMATS_SEARCH;
-        p_navigation->elapsed_ms = 0u;
-        issue(p_navigation, MOTION_TURN, NAVIGATION_QUARTER_ARC_MM,
-              ROBOT_TURN_MM_SECOND, true);
+        start_search(p_navigation, false);
     }
     else
     {
@@ -279,6 +274,143 @@ static void step_follow (navigation_t * p_navigation, bool b_line_lost,
             p_navigation->b_slow = b_slow;
         }
     }
+}
+
+/** @brief Sweep left a quarter turn first; stage 0 is that left turn. */
+static void start_search(navigation_t * p_navigation, bool b_line_valid)
+{
+    p_navigation->state        = DATA_FORMATS_SEARCH;
+    p_navigation->stage        = 0u;
+    p_navigation->b_waiting    = true;
+    p_navigation->elapsed_ms   = 0u;
+    p_navigation->line_confirm = b_line_valid ? 1u : 0u;
+    issue(p_navigation, MOTION_TURN, NAVIGATION_QUARTER_ARC_MM,
+          ROBOT_TURN_MM_SECOND, true);
+}
+
+/** @brief A finished left turn is followed by a right turn of twice the arc,
+ * so the sensors pass back through centre and sweep the right side as well.
+ */
+static void step_search(navigation_t * p_navigation, bool b_done,
+                        bool b_line_valid)
+{
+    p_navigation->line_confirm = b_line_valid
+                                     ? ((p_navigation->line_confirm < 3u)
+                                            ? (p_navigation->line_confirm + 1u)
+                                            : 3u)
+                                     : 0u;
+
+    if (p_navigation->line_confirm >= 3u)
+    {
+        p_navigation->b_stop_requested = true;
+        p_navigation->state            = DATA_FORMATS_FOLLOW;
+        p_navigation->stage            = 0u;
+        p_navigation->b_waiting        = false;
+        issue(p_navigation, MOTION_FOLLOW, 0u, ROBOT_CAUTIOUS_MM_SECOND,
+              false);
+    }
+    else if (p_navigation->elapsed_ms >= ROBOT_SEARCH_MS)
+    {
+        p_navigation->b_fault = true;
+    }
+    else if ((p_navigation->b_waiting) && b_done &&
+             (0u == p_navigation->stage))
+    {
+        p_navigation->stage = 1u;
+        issue(p_navigation, MOTION_TURN,
+              (uint16_t)(NAVIGATION_QUARTER_ARC_MM * 2u), ROBOT_TURN_MM_SECOND,
+              false);
+    }
+    else if ((p_navigation->b_waiting) && b_done)
+    {
+        /* Both sides have been swept without finding the line. */
+        p_navigation->b_waiting = false;
+        p_navigation->b_fault   = true;
+    }
+    else
+    {
+        /* The current turn is still running. */
+    }
+}
+
+/** @brief Look left, then right, then return to centre and choose a side.
+ * Each reading waits for the robot to settle, so the ultrasonic median was
+ * measured with the body still and facing that way.
+ */
+static void step_look(navigation_t * p_navigation, bool b_done,
+                      uint16_t range_cm, bool b_range_valid)
+{
+    uint32_t look    = p_navigation->look;
+    bool     b_still = (p_navigation->elapsed_ms >= NAVIGATION_LOOK_SETTLE_MS);
+    uint16_t seen    = b_range_valid ? range_cm : 0u;
+
+    switch (look)
+    {
+        case 0u:
+            if (b_still)
+            {
+                issue(p_navigation, MOTION_TURN, NAVIGATION_LOOK_ARC_MM,
+                      ROBOT_TURN_MM_SECOND, true);
+                look = 1u;
+            }
+            break;
+
+        case 1u:
+        case 3u:
+        case 5u:
+            if (b_done)
+            {
+                ++look;
+                p_navigation->elapsed_ms = 0u;
+            }
+            break;
+
+        case 2u:
+            if (b_still)
+            {
+                p_navigation->left_cm = seen;
+                issue(p_navigation, MOTION_TURN,
+                      (uint16_t)(NAVIGATION_LOOK_ARC_MM * 2u),
+                      ROBOT_TURN_MM_SECOND, false);
+                look = 3u;
+            }
+            break;
+
+        case 4u:
+            if (b_still)
+            {
+                p_navigation->right_cm = seen;
+                issue(p_navigation, MOTION_TURN, NAVIGATION_LOOK_ARC_MM,
+                      ROBOT_TURN_MM_SECOND, true);
+                look = 5u;
+            }
+            break;
+
+        default:
+        {
+            bool b_left = (p_navigation->left_cm >= p_navigation->right_cm);
+            uint32_t best =
+                b_left ? p_navigation->left_cm : p_navigation->right_cm;
+
+            if (best >= OBSTACLE_CLEAR_CM)
+            {
+                p_navigation->b_left     = b_left;
+                p_navigation->stage      = 1u;
+                p_navigation->b_waiting  = false;
+                p_navigation->elapsed_ms = 0u;
+            }
+            else
+            {
+                /* Neither side is clear enough for the bypass legs. */
+                p_navigation->b_fault = true;
+            }
+
+            look = 0u;
+        }
+        break;
+    }
+
+    p_navigation->look = look;
 }
 
 /*** End of file. ***/

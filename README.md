@@ -104,6 +104,9 @@ rules. See [coding_standard.md](docs/coding_standard.md) for the review scope.
 
 ## Binary MQTT
 
+MQTT topic names are declared in `app_program/subsystem1/telemetry.h`.
+After changing them, rebuild and flash the firmware and update subscribers.
+
 All MQTT calls run inside the existing core-0 WiFi service. Application tasks
 use bounded nonblocking queues; they never call lwIP or CYW43 directly.
 

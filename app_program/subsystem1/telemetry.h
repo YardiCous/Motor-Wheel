@@ -7,6 +7,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Shared MQTT topic names for telemetry and supervisory commands. */
+#define TELEMETRY_TOPIC_TELEMETRY "robot/telemetry"
+#define TELEMETRY_TOPIC_STATUS "robot/status"
+#define TELEMETRY_TOPIC_COMMAND "robot/command"
+#define TELEMETRY_TOPIC_ACK "robot/ack"
+
 /** @brief Only a single command byte may be accumulated. */
 typedef struct
 {

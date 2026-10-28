@@ -229,7 +229,8 @@ static void network_tick (void * p_argument)
     (void)p_argument;
     T_CYW43_UTK_STATUS radio = {0};
     cyw43_utk_get_status(&radio);
-    bool b_wifi   = (2 == radio.link_status);
+    /* CYW43_LINK_UP is 3; status 2 means connected without an IP. */
+    bool b_wifi   = (3 == radio.link_status);
     bool b_online = b_wifi && (MQTT_UTK_ONLINE == g_connection.state) &&
                     (0u != mqtt_client_is_connected(gp_client));
     robot_os_network(b_wifi, b_online);

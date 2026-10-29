@@ -413,6 +413,13 @@ static void update_distance (motion_t * p_motion, int32_t left, int32_t right)
     int32_t right_abs     = (right < 0) ? -right : right;
     /* A 64-edge guard bounds this positive increment below 14000. */
     uint32_t progress = (uint32_t)(((left_abs + right_abs) * 102100) / 960);
+    /* Total wheel travel increases in either direction, including turns. */
+    uint32_t total_numerator =
+        ((uint32_t)(left_abs + right_abs) * 102100u) +
+        p_motion->total_remainder;
+    uint32_t total = p_motion->total_um + (total_numerator / 960u);
+    p_motion->total_um = total % MOTION_POSITION_MOD_UM;
+    p_motion->total_remainder = total_numerator % 960u;
     progress += p_motion->progress_um;
     p_motion->progress_um = (progress > 4095999u) ? 4095999u : progress;
 }

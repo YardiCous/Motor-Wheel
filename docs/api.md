@@ -184,6 +184,8 @@ typedef struct
     uint32_t last_left;
     uint32_t last_right;
     uint32_t position_um : 22;
+    uint32_t total_um : 22;
+    uint32_t total_remainder : 10;
     uint32_t mode : 3;
     bool     b_reverse : 1;
     bool     b_done : 1;
@@ -376,6 +378,9 @@ typedef struct
     bool     b_estop : 1;
     uint32_t barcode : 2;
     uint32_t elapsed_ms : 14;
+    uint32_t look : 3;
+    uint32_t left_cm : 9;
+    uint32_t right_cm : 9;
     uint32_t command;
 } navigation_t;
 
@@ -397,7 +402,10 @@ Run one 10-ms arbitration cycle; output is one packed command.
 
 `void obstacle_init(obstacle_t * p_obstacle);`
 
-The servo angle is represented in three-degree units. */
+Minimum clear distance (cm) a side needs before a bypass is planned. Keep it above the box reading at the stop (about 40 cm), or a reading of the box itself can pass as clear. */
+#define OBSTACLE_CLEAR_CM 40u
+
+/** @brief The servo angle is represented in three-degree units. */
 typedef struct
 {
     uint32_t state : 3;

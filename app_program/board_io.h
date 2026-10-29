@@ -29,10 +29,15 @@ void board_io_clear_fault(void);
 void board_io_motor(int16_t left, int16_t right);
 /** @brief Sample all three 12-bit ADC channels with a bounded timeout. */
 bool board_io_line(uint16_t * p_samples);
-/** @brief Initialize the 100-Hz, +/-4-g LSM303DLHC accelerometer. */
-bool board_io_imu_init(void);
-/** @brief Read a coherent XYZ sample in milli-g through I2C1. */
-bool board_io_imu(int16_t * p_x, int16_t * p_y, int16_t * p_z);
+/** @brief Reset I2C1 to 400-kHz master mode; no bus traffic. */
+void board_io_i2c_init(void);
+/** @brief Read 1..8 consecutive registers from a 7-bit I2C1 target.
+ * The caller sets the chip's auto-increment bit in reg when it needs one.
+ */
+bool board_io_i2c_read(uint8_t address, uint8_t reg, uint8_t * p_bytes,
+                       uint8_t length);
+/** @brief Write one register on a 7-bit I2C1 target. */
+bool board_io_i2c_write(uint8_t address, uint8_t reg, uint8_t value);
 /** @brief Set a servo angle 0..60 in three-degree units. */
 void board_io_servo(uint8_t angle);
 /** @brief Trigger a 10-us pulse using TIMER alarm 3, without busy waiting. */

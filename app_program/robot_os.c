@@ -19,6 +19,10 @@
 #include "subsystem2/encoder_test.h"
 #endif /* ENCODER_TEST */
 #include "subsystem3/line.h"
+#include "subsystem4/drv_lsm303.h"
+#if IMU_TEST
+#include "subsystem4/imu_test.h"
+#endif /* IMU_TEST */
 #include "subsystem4/safety.h"
 #include "subsystem4/terrain.h"
 #include "subsystem5/navigation.h"
@@ -95,7 +99,7 @@ typedef struct
 #endif /* OBSTACLE_TEST */
 
 static volatile cyclic_t g_clock = {0};
-#if ((!MOTOR_TEST) && (!ENCODER_TEST))
+#if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!IMU_TEST))
 static buttons_t g_buttons = {0};
 #endif /* MOTOR_TEST && ENCODER_TEST */
 static volatile shared_t g_shared                               = {0};
@@ -128,7 +132,7 @@ static void     terrain_task(INT start, void * p_argument);
 static void     navigation_task(INT start, void * p_argument);
 static void     obstacle_task(INT start, void * p_argument);
 static void     telemetry_task(INT start, void * p_argument);
-#if ((!MOTOR_TEST) && (!ENCODER_TEST))
+#if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!IMU_TEST))
 static void motion_cycle(motion_t * p_motion);
 #endif /* MOTOR_TEST && ENCODER_TEST */
 #if !OBSTACLE_TEST
@@ -138,16 +142,16 @@ static void line_stub(void);
 static void bench_init(bench_t * p_bench);
 static void bench_step(navigation_t * p_navigation, bench_t * p_bench);
 #endif /* OBSTACLE_TEST */
-#if ((!OBSTACLE_TEST) && (!LINE_TEST))
-static void terrain_cycle(terrain_t * p_terrain, bool * pb_configured);
-#else
+#if ((!OBSTACLE_TEST) && (!LINE_TEST) && (!IMU_TEST))
+static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu);
+#elif (OBSTACLE_TEST || LINE_TEST)
 static void terrain_stub(void);
-#endif /* OBSTACLE_TEST || LINE_TEST */
+#endif /* OBSTACLE_TEST || LINE_TEST || IMU_TEST */
 #if LINE_TEST
 static void line_report_init(void);
 static void line_report(void);
 #endif /* LINE_TEST */
-#if ((!MOTOR_TEST) && (!ENCODER_TEST))
+#if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!IMU_TEST))
 static void navigation_cycle(navigation_t * p_navigation);
 static void local_commands(navigation_t * p_navigation);
 static void remote_commands(navigation_t * p_navigation);
@@ -491,6 +495,14 @@ static void motion_task(INT start, void * p_argument)
         wait_release();
         encoder_test_step(&encoder_test);
     }
+#elif IMU_TEST
+    /* IMU bring-up: Motion never calls board_io_motor(), so PWM stays at
+     * the zero duty board_io_init() set. imu_test reads the encoders. */
+    for (;;)
+    {
+        wait_release();
+        heartbeat(0u);
+    }
 #else
 
     for (;;)
@@ -531,23 +543,32 @@ static void terrain_task(INT start, void * p_argument)
 {
     (void)start;
     (void)p_argument;
-#if (OBSTACLE_TEST || LINE_TEST)
+#if IMU_TEST
+    static imu_test_t bring_up = {0};
+    imu_test_init(&bring_up);
+
+    for (;;)
+    {
+        wait_release();
+        imu_test_step(&bring_up);
+    }
+#elif (OBSTACLE_TEST || LINE_TEST)
     for (;;)
     {
         wait_release();
         terrain_stub();
     }
 #else
-    terrain_t detector = {0};
+    terrain_t    detector = {0};
+    drv_lsm303_t imu      = {0};
     terrain_init(&detector);
-    bool b_configured = false;
 
     for (;;)
     {
         wait_release();
-        terrain_cycle(&detector, &b_configured);
+        terrain_cycle(&detector, &imu);
     }
-#endif /* OBSTACLE_TEST || LINE_TEST */
+#endif /* IMU_TEST, OBSTACLE_TEST || LINE_TEST */
 }
 
 /** @brief Navigation owns supervisory commands and motion arbitration. */
@@ -561,7 +582,7 @@ static void navigation_task(INT start, void * p_argument)
         wait_release();
         heartbeat(3u);
     }
-#elif ENCODER_TEST
+#elif (ENCODER_TEST || IMU_TEST)
     for (;;)
     {
         wait_release();
@@ -662,7 +683,7 @@ static void telemetry_task(INT start, void * p_argument)
     }
 }
 
-#if ((!MOTOR_TEST) && (!ENCODER_TEST))
+#if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!IMU_TEST))
 /** @brief Stop/reset is processed before accepting another movement. */
 static void motion_cycle(motion_t * p_motion)
 {
@@ -815,11 +836,20 @@ static void line_cycle(line_t * p_line)
 
 #endif /* OBSTACLE_TEST */
 
-#if ((!OBSTACLE_TEST) && (!LINE_TEST))
-/** @brief Failed or aged data invalidates height instead of inventing a
- * sample.
+#if ((!OBSTACLE_TEST) && (!LINE_TEST) && (!IMU_TEST))
+/** @brief Gather one IMU + Motion sample, step terrain, publish results.
+ *
+ * Stale Motion data (older than ROBOT_SENSOR_AGE_MS) is passed through as
+ * stale: terrain skips that height step but still checks for impact. Only
+ * I2C failures count toward SENSOR_FAULT.
+ * Shared outputs (Buddy 4, see subsystem4/terrain.h):
+ *   ON_HUMP (bit 137)   set when a hump is confirmed, cleared at LEVEL,
+ *                       on a timeout, on IMPACT and on SENSOR_FAULT.
+ *   FAULT_IMU           while in SENSOR_FAULT; advisory, not fatal.
+ *   FAULT_IMPACT        while IMPACT is held (200 ms); fatal; Safety is
+ *                       woken immediately on entry.
  */
-static void terrain_cycle(terrain_t * p_terrain, bool * pb_configured)
+static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu)
 {
     uint32_t mask        = board_io_lock();
     bool     b_reset     = g_shared.b_reset_imu;
@@ -830,47 +860,53 @@ static void terrain_cycle(terrain_t * p_terrain, bool * pb_configured)
     if (b_reset)
     {
         terrain_init(p_terrain);
-        *pb_configured = false;
     }
 
-    if (!*pb_configured)
+    if (p_terrain->b_request_init)
     {
-        *pb_configured = board_io_imu_init();
+        /* Boot, RESET, or SENSOR_FAULT retry (at most every 100 ms). */
+        (void)drv_lsm303_init(p_imu);
     }
 
-    int16_t accel_x = 0;
-    int16_t accel_y = 0;
-    int16_t accel_z = 0;
-    bool    b_read =
-        (*pb_configured) && (board_io_imu(&accel_x, &accel_y, &accel_z));
-    bool     b_fresh  = b_read && ((board_io_time_ms() - motion_time) <= 20u);
+    terrain_input_t input = {0};
+    input.b_imu_ok        = drv_lsm303_accel(p_imu, NULL, input.accel_mg);
+    input.b_motion_fresh =
+        ((board_io_time_ms() - motion_time) <= ROBOT_SENSOR_AGE_MS);
     uint32_t snapshot = field_read(5u, 32u);
-    /* The nine-bit speed has maximum magnitude 511. */
-    int16_t speed = (int16_t)((snapshot >> 12u) & 511u);
+    /* Distance 12 bits, |speed| 9 bits (0..511 mm/s), reverse 1 bit. */
+    int32_t speed = (int32_t)((snapshot >> 12u) & 511u);
     speed         = (0u != (snapshot & (1u << 21u))) ? -speed : speed;
-    terrain_step(p_terrain, accel_x, accel_y, accel_z, speed, snapshot & 4095u,
-                 b_fresh);
-    uint16_t faults =
-        (p_terrain->failures >= 3u) ? DATA_FORMATS_FAULT_IMU : 0u;
-    faults |= p_terrain->b_impact ? DATA_FORMATS_FAULT_IMPACT : 0u;
-    faults |= p_terrain->b_overflow ? DATA_FORMATS_FAULT_RANGE : 0u;
+    input.speed_mm_s  = (int16_t)speed;
+    input.distance_mm = snapshot & 4095u;
+    /* Wheel speeds are offset binary, bias 512 (data_representation). */
+    input.left_mm_s  = (int16_t)data_formats_unsign(field_read(203u, 10u), 10u);
+    input.right_mm_s = (int16_t)data_formats_unsign(field_read(213u, 10u), 10u);
+    terrain_step(p_terrain, &input);
+
+    uint16_t faults = (TERRAIN_SENSOR_FAULT == p_terrain->state)
+                          ? DATA_FORMATS_FAULT_IMU
+                          : 0u;
+    faults |= (TERRAIN_IMPACT == p_terrain->state) ? DATA_FORMATS_FAULT_IMPACT
+                                                   : 0u;
     fault_source(ROBOT_SOURCE_IMU, faults);
     field_write(85u, 3u, p_terrain->state);
-    field_write(88u, 7u, p_terrain->pitch);
-    field_write(95u, 8u, p_terrain->peak_mm);
-    field_write(137u, 1u, p_terrain->b_on_hump);
-    field_write(138u, 1u, p_terrain->b_valid);
+    field_write(88u, 7u, p_terrain->pitch_field);
+    field_write(95u, 8u, p_terrain->run_peak_mm);
+    field_write(137u, 1u, p_terrain->b_on_hump ? 1u : 0u);
+    field_write(138u, 1u, p_terrain->b_peak_valid ? 1u : 0u);
     mask                 = board_io_lock();
-    g_shared.b_imu_ready = (p_terrain->samples >= ROBOT_IMU_CAL_SAMPLES) &&
-                           (p_terrain->failures < 3u);
+    g_shared.b_imu_ready = terrain_ready(p_terrain);
     board_io_unlock(mask);
 
     if ((p_terrain->b_started) || (p_terrain->b_finished))
     {
+        /* finished1 + peak8 + valid1 (TEAM.md); Navigation is the only
+         * consumer. A start event carries peak 0. */
+        uint32_t peak  = p_terrain->b_finished ? p_terrain->hump_peak_mm : 0u;
+        uint16_t word  = terrain_event_pack(p_terrain->b_finished, peak,
+                                           p_terrain->b_hump_valid);
         uint8_t event[2] = {0u};
-        (void)data_formats_write(event, 0u, 1u, p_terrain->b_finished);
-        (void)data_formats_write(event, 1u, 8u, p_terrain->peak_mm);
-        (void)data_formats_write(event, 9u, 1u, p_terrain->b_valid);
+        (void)data_formats_write(event, 0u, 16u, word);
         ER result = tk_snd_mbf(gh_imu_queue, event, 2, TMO_POL);
         mask      = board_io_lock();
         g_shared.b_queue_fault =
@@ -878,17 +914,18 @@ static void terrain_cycle(terrain_t * p_terrain, bool * pb_configured)
         board_io_unlock(mask);
     }
 
-    *pb_configured = b_read;
     heartbeat(2u);
 
-    if (0u != faults)
+    if (p_terrain->b_impact)
     {
+        /* Tribunal 1: IMPACT wakes Safety now, not at its next 20-ms tick.
+         */
         (void)tk_wup_tsk(gh_tasks[0]);
     }
 }
-#endif /* OBSTACLE_TEST || LINE_TEST */
+#endif /* OBSTACLE_TEST || LINE_TEST || IMU_TEST */
 
-#if ((!MOTOR_TEST) && (!ENCODER_TEST))
+#if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!IMU_TEST))
 /** @brief Latest line data is combined with consumptive motion events. */
 static void navigation_cycle(navigation_t * p_navigation)
 {

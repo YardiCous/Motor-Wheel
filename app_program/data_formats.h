@@ -22,7 +22,10 @@
 #define DATA_FORMATS_FAULT_TIMEOUT 0x200u
 #define DATA_FORMATS_FAULT_QUEUE 0x400u
 #define DATA_FORMATS_FAULT_MQTT 0x800u
-#define DATA_FORMATS_FATAL_MASK 0x7efu
+/* IMU fault (0x004) is advisory: the run continues with hump height marked
+ * invalid (team decision pending, proposed by Buddy 4). IMPACT stays fatal.
+ */
+#define DATA_FORMATS_FATAL_MASK 0x7ebu
 
 #define DATA_FORMATS_BOOT 0u
 #define DATA_FORMATS_IDLE 1u

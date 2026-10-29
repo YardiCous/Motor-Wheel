@@ -99,11 +99,27 @@ ENCODER_TEST ?= 0
 ifneq ($(filter $(ENCODER_TEST),0 1),$(ENCODER_TEST))
 $(error Unknown ENCODER_TEST '$(ENCODER_TEST)'; use 0 or 1)
 endif
+
+# IMU_TEST=1 builds the motor-off IMU bring-up (Buddy 4): I2C1 scan, chip
+# identification and a CSV stream on the USB console. Motion never drives
+# the motors in this build.
+IMU_TEST ?= 0
+ifneq ($(filter $(IMU_TEST),0 1),$(IMU_TEST))
+$(error Unknown IMU_TEST '$(IMU_TEST)'; use 0 or 1)
+endif
+ifneq ($(filter 1,$(MOTOR_TEST) $(ENCODER_TEST)),)
+ifeq ($(IMU_TEST),1)
+$(error IMU_TEST=1 cannot be combined with MOTOR_TEST or ENCODER_TEST)
+endif
+endif
 ifeq ($(ENCODER_TEST),1)
 ENCODER_TEST_SUFFIX := _encodertest
 endif
 ifeq ($(MOTOR_TEST),1)
 MOTOR_TEST_SUFFIX := _motortest
+endif
+ifeq ($(IMU_TEST),1)
+IMU_TEST_SUFFIX := _imutest
 endif
 ifeq ($(TEST),1)
 TEST_SUFFIX := _test
@@ -134,7 +150,7 @@ endif
 # a live hazard: an SMP=1 build was once flashed in place of an SMP=0 one and
 # only the banner in the log revealed it.
 #
-EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)$(MOTOR_TEST_SUFFIX)$(ENCODER_TEST_SUFFIX)
+EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)$(MOTOR_TEST_SUFFIX)$(ENCODER_TEST_SUFFIX)$(IMU_TEST_SUFFIX)
 
 GCC := arm-none-eabi-gcc
 AS := arm-none-eabi-gcc
@@ -194,7 +210,7 @@ ifeq ($(SMP),1)
 CFLAGS  += -DCNF_SMP=1
 ASFLAGS += -DCNF_SMP=1
 endif
-CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST)
+CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST) -DIMU_TEST=$(IMU_TEST)
 CFLAGS  += -DTM_CONSOLE_UART=$(CRASH_REPORT)
 ifeq ($(CRASH_REPORT),0)
 CFLAGS  += -DBOARD_UART0_FREE=1
@@ -227,7 +243,9 @@ endif
 # before any recipe executes.
 ################################################################################
 
-PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)
+# Every -D switch must appear here. MOTOR_TEST and ENCODER_TEST were
+# missing, so a motor-test object could be relinked into a normal image.
+PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)-motor$(MOTOR_TEST)-encoder$(ENCODER_TEST)-imu$(IMU_TEST)
 PROFILE_FILE := .build_profile
 
 ifneq ($(strip $(shell cat $(PROFILE_FILE) 2>/dev/null)),$(PROFILE_ID))

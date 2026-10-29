@@ -23,10 +23,6 @@
 #define MQTT_UTK_SUBSCRIBING 2u
 #define MQTT_UTK_ONLINE 3u
 #define MQTT_UTK_RETRY 4u
-#define MQTT_UTK_TELEMETRY "robot/telemetry"
-#define MQTT_UTK_STATUS "robot/status"
-#define MQTT_UTK_COMMAND "robot/command"
-#define MQTT_UTK_ACK "robot/ack"
 
 /** @brief Retry state has five values and an exponent bounded to five. */
 typedef struct
@@ -130,7 +126,7 @@ static void incoming_publish (void * p_argument, const char * p_topic,
 {
     (void)p_argument;
     telemetry_begin(&g_receiver, total,
-                    0 == strcmp(p_topic, MQTT_UTK_COMMAND));
+                    0 == strcmp(p_topic, TELEMETRY_TOPIC_COMMAND));
 
     if (0u == total)
     {
@@ -208,7 +204,7 @@ static void connection_changed (mqtt_client_t * p_client, void * p_argument,
         g_connection.state = MQTT_UTK_SUBSCRIBING;
         mqtt_set_inpub_callback(gp_client, incoming_publish, incoming_data,
                                 NULL);
-        err_t result = mqtt_subscribe(gp_client, MQTT_UTK_COMMAND, 0u,
+        err_t result = mqtt_subscribe(gp_client, TELEMETRY_TOPIC_COMMAND, 0u,
                                       subscribe_done, NULL);
 
         if (ERR_OK != result)
@@ -241,14 +237,14 @@ static void network_tick (void * p_argument)
 
         if (robot_os_telemetry(packet))
         {
-            (void)mqtt_publish(gp_client, MQTT_UTK_TELEMETRY, packet,
+            (void)mqtt_publish(gp_client, TELEMETRY_TOPIC_TELEMETRY, packet,
                                DATA_FORMATS_TELEMETRY_BYTES, 0u, 0u,
                                publish_done, NULL);
         }
 
         uint8_t status = DATA_FORMATS_VERSION | 4u | 8u;
-        (void)mqtt_publish(gp_client, MQTT_UTK_STATUS, &status, 1u, 0u, 0u,
-                           publish_done, NULL);
+        (void)mqtt_publish(gp_client, TELEMETRY_TOPIC_STATUS, &status, 1u,
+                           0u, 0u, publish_done, NULL);
 
         for (uint8_t slot = 0u; slot < MQTT_UTK_ACK_LIMIT; ++slot)
         {
@@ -269,7 +265,7 @@ static void send_ack (uint8_t ack)
 {
     if ((NULL != gp_client) && (0u != mqtt_client_is_connected(gp_client)))
     {
-        (void)mqtt_publish(gp_client, MQTT_UTK_ACK, &ack, 1u, 0u, 0u,
+        (void)mqtt_publish(gp_client, TELEMETRY_TOPIC_ACK, &ack, 1u, 0u, 0u,
                            publish_done, NULL);
     }
 }

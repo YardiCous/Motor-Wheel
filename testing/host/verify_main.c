@@ -221,6 +221,31 @@ static void verify_motion (void)
     motion_ticks(&controller, VERIFY_MOTION_STEPS, 12u, false);
     assert(MOTION_FOLLOW == controller.mode);
     assert(controller.position_um > 2000000u);
+
+    /* One revolution each way cancels position but adds wheel travel. */
+    motion_init(&controller, 0u, 0u);
+    motion_ticks(&controller, 960u, 1u, false);
+    assert(204200u == controller.total_um);
+    for (uint32_t edge = 960u; edge > 0u; --edge)
+    {
+        motion_step(&controller, edge - 1u, edge - 1u, 0, false,
+                     &left_pwm, &right_pwm);
+    }
+    assert(0u == controller.position_um);
+    assert(408400u == controller.total_um);
+    assert(0u == controller.total_remainder);
+    motion_ticks(&controller, 960u, 1u, true);
+    assert(0u == controller.position_um);
+    assert(612600u == controller.total_um);
+    motion_ticks(&controller, 960u, 0u, false);
+    assert(612600u == controller.total_um);
+    /* Preserve fractional travel across the existing 4096-mm wrap. */
+    controller.total_um = 4095900u;
+    motion_ticks(&controller, 960u, 1u, false);
+    assert(204100u == controller.total_um);
+    motion_init(&controller, controller.last_left, controller.last_right);
+    assert(0u == controller.total_um);
+    assert(0u == controller.total_remainder);
 }
 
 /** @brief Every combination of the twelve faults respects advisory exclusions.

@@ -87,6 +87,7 @@ and the units for biased fields are described below and in the headers.
 | robot_os / shared_t | `b_network_online` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_visible` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_lost` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `total_distance_mm` | 0..4095 | 12 | unsigned bit-field |
 | robot_os / shared_t | `reset_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / cyclic_t | `phase` | 0..99 | 7 | unsigned bit-field |
 | robot_os / buttons_t | `stable_count` | 0..3 | 2 | unsigned bit-field |
@@ -101,6 +102,8 @@ and the units for biased fields are described below and in the headers.
 | encoder_test / encoder_test_t | `last_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | encoder_test / encoder_test_t | `last_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | motion / motion_t | `position_um` | 0..4095999 | 22 | unsigned bit-field |
+| motion / motion_t | `total_um` | 0..4194303 | 22 | unsigned bit-field |
+| motion / motion_t | `total_remainder` | 0..1023 | 10 | unsigned bit-field |
 | motion / motion_t | `mode` | 0..6 | 3 | unsigned bit-field |
 | motion / motion_t | `b_reverse` | 0..1 | 1 | bool bit-field |
 | motion / motion_t | `b_done` | 0..1 | 1 | bool bit-field |
@@ -175,6 +178,9 @@ and the units for biased fields are described below and in the headers.
 | navigation / navigation_t | `b_estop` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `barcode` | 0..3 | 2 | unsigned bit-field |
 | navigation / navigation_t | `elapsed_ms` | 0..10000 | 14 | unsigned bit-field |
+| navigation / navigation_t | `look` | 0..7 | 3 | unsigned bit-field |
+| navigation / navigation_t | `left_cm` | 0..511 | 9 | unsigned bit-field |
+| navigation / navigation_t | `right_cm` | 0..511 | 9 | unsigned bit-field |
 | navigation / navigation_t | `command` | 0..16777215 | 24 | explicit kind2 + distance12 + speed9 + reverse1; high8 zero |
 | obstacle / obstacle_t | `state` | 0..6 | 3 | unsigned bit-field |
 | obstacle / obstacle_t | `angle` | 0..60 | 6 | unsigned bit-field |

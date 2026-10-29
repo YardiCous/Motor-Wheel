@@ -65,6 +65,7 @@ typedef struct
     bool     b_network_online : 1;
     bool     b_line_visible : 1;
     bool     b_line_lost : 1;
+    uint32_t total_distance_mm : 12;
     uint32_t reset_at_ms;
 } shared_t;
 
@@ -650,6 +651,9 @@ static void telemetry_task(INT start, void * p_argument)
             packet[index] = g_packet[index];
         }
 
+        /* Control consumers retain signed odometry in g_packet. */
+        (void)data_formats_write(packet, 5u, 12u,
+                                 g_shared.total_distance_mm);
         board_io_unlock(mask);
         (void)data_formats_write(packet, 224u, 32u, board_io_time_ms());
         ER result = tk_snd_mbf(gh_telemetry_queue, packet, 32, TMO_POL);
@@ -754,6 +758,7 @@ static void motion_cycle(motion_t * p_motion)
     field_write(213u, 10u, data_formats_signed(speed_right, 10u));
     mask                   = board_io_lock();
     g_shared.b_motion_done = (g_shared.b_motion_done) || (p_motion->b_done);
+    g_shared.total_distance_mm = p_motion->total_um / 1000u;
     board_io_unlock(mask);
     p_motion->b_done = false;
     heartbeat(0u);

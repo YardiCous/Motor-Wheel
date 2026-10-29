@@ -21,6 +21,7 @@ def build(root, executable, sanitize=True):
         command += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
     command += [str(root / "testing/host/verify_main.c")]
     command += [str(root / "testing/host/motor_test.c")]
+    command += [str(root / "testing/host/terrain_test.c")]
     command += [str(root / "app_program" / source) for source in CORE]
     command += ["-o", str(executable)]
     subprocess.run(command, check=True)

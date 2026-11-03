@@ -15,7 +15,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'tools'))
+sys.path.insert(0, str(ROOT / 'tools/dashboard'))
 import telemetry_dashboard as dashboard
 
 VECTOR = bytes.fromhex('e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e')
@@ -151,7 +151,7 @@ class HTTPTests(unittest.TestCase):
             worker.join()
 
     def test_demo_cli_runs_without_mqtt_dependency(self):
-        process = subprocess.Popen([sys.executable, '-S', str(ROOT / 'tools/telemetry_dashboard.py'),
+        process = subprocess.Popen([sys.executable, '-S', str(ROOT / 'tools/dashboard/telemetry_dashboard.py'),
                                     '--demo', '--no-browser', '--port', '0'],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:

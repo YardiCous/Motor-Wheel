@@ -20,7 +20,7 @@ import webbrowser
 
 from robot_protocol import FIELDS, decode
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 HTML = Path(__file__).with_suffix('.html')
 HISTORY_LIMIT = 1200
 
@@ -153,7 +153,7 @@ def start_mqtt(state, args):
         import paho.mqtt.client as mqtt
     except ImportError:
         raise SystemExit('MQTT dependency missing. Run:\n'
-                         '  python3 -m pip install -r tools/requirements-dashboard.txt\n'
+                         '  python3 -m pip install -r tools/dashboard/requirements-dashboard.txt\n'
                          'Or preview without dependencies using --demo.') from None
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
                          client_id=f'mw-dashboard-{uuid.uuid4().hex[:8]}',

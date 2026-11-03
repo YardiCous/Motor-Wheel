@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 
 from format_c import ROOT, sources
-from robot_protocol import FIELDS, PACKET_BYTES
+from dashboard.robot_protocol import FIELDS, PACKET_BYTES
 
 MAXIMUMS = {
     "motion_t": {"mode": 6, "speed": 500, "progress_um": 4095999,

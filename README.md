@@ -113,11 +113,11 @@ and decodes live telemetry using the existing protocol decoder.
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r tools/requirements-dashboard.txt
-python tools/telemetry_dashboard.py
+python -m pip install -r tools/dashboard/requirements-dashboard.txt
+python tools/dashboard/telemetry_dashboard.py
 
 # Preview simulated readings without a robot or extra dependencies:
-python3 tools/telemetry_dashboard.py --demo
+python3 tools/dashboard/telemetry_dashboard.py --demo
 ```
 
 The broker address is read from `config/wifi_secrets.h`; override it with
@@ -141,9 +141,9 @@ use bounded nonblocking queues; they never call lwIP or CYW43 directly.
 | `robot/ack` | 1 byte; echoed command2/sequence4, accepted1, malformed1 |
 
 ```sh
-python3 tools/robot_protocol.py command stop 0
-python3 tools/robot_protocol.py command start 1
-python3 tools/robot_protocol.py decode e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e
+python3 tools/dashboard/robot_protocol.py command stop 0
+python3 tools/dashboard/robot_protocol.py command start 1
+python3 tools/dashboard/robot_protocol.py decode e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e
 ```
 
 Send commands without MQTT retain. Each new MQTT connection requires a fresh

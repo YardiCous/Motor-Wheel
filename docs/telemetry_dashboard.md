@@ -11,18 +11,18 @@ python3 -m venv .venv
 # Linux / macOS:
 source .venv/bin/activate
 # Windows PowerShell instead: .venv\Scripts\Activate.ps1
-python -m pip install -r tools/requirements-dashboard.txt
+python -m pip install -r tools/dashboard/requirements-dashboard.txt
 ```
 
 Then, each time:
 
 ```sh
-python tools/telemetry_dashboard.py
+python tools/dashboard/telemetry_dashboard.py
 ```
 
 The launcher opens **http://127.0.0.1:8765**. Leave the terminal running;
 Ctrl+C stops it. Keep the repository files together: the launcher uses
-`tools/robot_protocol.py` and `tools/telemetry_dashboard.html` alongside it.
+`tools/dashboard/robot_protocol.py` and `tools/dashboard/telemetry_dashboard.html` alongside it.
 
 The broker defaults to `MQTT_BROKER_IP` / `MQTT_BROKER_PORT` in your existing
 `config/wifi_secrets.h`, or `localhost:1883` if that file is absent. Topic names
@@ -37,7 +37,7 @@ existing MQTT broker; it does not start one or flash the robot.
 ## Preview without hardware
 
 ```sh
-python tools/telemetry_dashboard.py --demo
+python tools/dashboard/telemetry_dashboard.py --demo
 ```
 
 Demo mode needs only Python 3.10+ and the repository files. It creates valid
@@ -47,9 +47,9 @@ The dashboard clearly labels simulated readings.
 ## Connection options
 
 ```sh
-python tools/telemetry_dashboard.py --broker 192.168.1.10
-python tools/telemetry_dashboard.py --broker broker.example.com --broker-port 8883 --tls
-python tools/telemetry_dashboard.py --port 8766 --no-browser
+python tools/dashboard/telemetry_dashboard.py --broker 192.168.1.10
+python tools/dashboard/telemetry_dashboard.py --broker broker.example.com --broker-port 8883 --tls
+python tools/dashboard/telemetry_dashboard.py --port 8766 --no-browser
 ```
 
 `--topic` overrides the telemetry topic. `--ca path/to/ca.pem` supplies a custom
@@ -112,7 +112,7 @@ def decode(payload: bytes) -> dict:
 Then run:
 
 ```sh
-python tools/telemetry_dashboard.py --decoder my_decoder.py --broker 192.168.1.10
+python tools/dashboard/telemetry_dashboard.py --decoder my_decoder.py --broker 192.168.1.10
 ```
 
 The launcher imports the module, subscribes to its topic, and calls `decode`

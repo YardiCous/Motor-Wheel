@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101412">
+<title>Motor-Wheel · Telemetry</title>
+<style>
+:root{color-scheme:dark;--bg:#101412;--panel:#181e1a;--line:#303a32;--muted:#9ca99e;--text:#eef3ec;--green:#bbef83;--blue:#89c8ef;--amber:#f5ca79;--red:#ff9389}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,select,input{font:inherit}button,select{color:var(--text);background:#202820;border:1px solid #465244;border-radius:7px;padding:8px 12px;cursor:pointer}button:hover,select:hover{border-color:var(--green)}button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--green);outline-offset:4px}button:disabled{opacity:.4;cursor:default}button.active{background:var(--green);color:#182313;border-color:var(--green)}a{color:inherit;text-decoration:none}svg{display:block}header{height:78px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 4%;gap:20px}.brand{display:flex;align-items:center;gap:12px;font-weight:650;letter-spacing:.03em}.mark{width:34px;height:34px;border:1px solid var(--green);border-radius:50%;display:grid;place-items:center;color:var(--green)}.mark:before{content:"";width:12px;height:20px;border:3px solid currentColor;border-radius:50%;transform:rotate(30deg)}.brand small{font-size:11px;color:var(--muted);font-weight:400;letter-spacing:.15em}.header-right{display:flex;align-items:center;gap:20px}.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);padding:6px 11px;border-radius:30px;font-size:12px;color:var(--muted)}.dot{width:7px;height:7px;border-radius:50%;background:currentColor}.good{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}.muted{color:var(--muted)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums}.eyebrow{font-size:10px;letter-spacing:.15em;font-weight:650;color:var(--muted);text-transform:uppercase}main{max-width:1600px;margin:auto;padding:35px 4% 24px}.intro{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:25px}h1{font-weight:500;font-size:30px;letter-spacing:-.045em;margin:4px 0 5px}p{margin:0}.actions{display:flex;gap:9px}.connection-banner{border:1px solid #675131;background:#30281c;padding:12px 16px;border-radius:8px;color:var(--amber);margin-bottom:18px}.connection-banner[hidden]{display:none}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}.stat{padding:20px 23px;position:relative;min-height:139px}.stat .metric{font-size:37px;line-height:1.2;letter-spacing:-.055em;font-weight:450;margin:12px 0 7px}.unit{color:var(--muted);font-size:13px;letter-spacing:0;margin-left:5px}.stat small{font-size:12px;color:var(--muted)}.stat-icon{position:absolute;right:22px;top:19px;color:var(--green);font-size:17px}.workspace{display:grid;grid-template-columns:minmax(0,1.9fr) minmax(300px,1fr);gap:18px}.left-col,.right-col{display:flex;flex-direction:column;gap:18px}.card-head{padding:19px 22px 0;display:flex;align-items:center;justify-content:space-between;gap:12px}.card h2{font-size:14px;font-weight:550;margin:0}.subhead{font-size:11px;color:var(--muted);margin-top:3px}.segments{display:flex;gap:2px;padding:3px;background:#111713;border:1px solid var(--line);border-radius:7px}.segments button{background:transparent;border:0;padding:4px 9px;font-size:11px;color:var(--muted)}.segments button.active{background:#35442b;color:var(--green)}.chart-settings{padding:17px 22px 2px;display:flex;align-items:center;justify-content:space-between;gap:12px}.legend{display:flex;gap:15px;font-size:11px;color:var(--muted)}.legend span{display:flex;gap:6px;align-items:center}.legend i{width:7px;height:7px;border-radius:50%;background:var(--green)}.legend span:nth-child(2) i{background:var(--blue)}.legend span:nth-child(3) i{background:var(--amber)}select{padding:4px 8px;font-size:11px;max-width:190px}.chart-wrap{height:246px;position:relative;margin:0 16px 7px}.chart-wrap canvas{width:100%;height:100%;display:block}.empty-chart{position:absolute;inset:0;display:grid;place-content:center;color:var(--muted);text-align:center;font-size:12px;pointer-events:none}.empty-chart small{opacity:.7;margin-top:4px}.chart-foot{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding:11px 22px;font-size:11px;color:var(--muted)}.two-up{display:grid;grid-template-columns:1fr 1fr;gap:18px}.sensors{padding:20px 22px 23px}.sensor-row{display:grid;grid-template-columns:52px 1fr 38px;gap:12px;align-items:center;margin-top:17px;font-size:11px}.track{height:7px;background:#2c352e;border-radius:10px;overflow:hidden}.fill{height:100%;background:var(--green);border-radius:10px;transition:width .2s;width:0}.sensor-value{color:var(--muted);text-align:right}.sensor-foot{display:flex;justify-content:space-between;margin-top:25px;font-size:11px;color:var(--muted)}.terrain{padding:17px 22px 21px}.pitch-visual{height:87px;display:flex;align-items:center;justify-content:center;background:repeating-linear-gradient(0deg,transparent,transparent 21px,#263029 22px);margin:0 0 15px;overflow:hidden}.robot-line{width:120px;height:34px;border:1px solid var(--green);border-radius:8px 8px 3px 3px;position:relative;transition:transform .25s;background:#bbef8311}.robot-line:before,.robot-line:after{content:"";position:absolute;bottom:-8px;width:21px;height:14px;background:#526b3f;border:1px solid var(--green);border-radius:5px}.robot-line:before{left:13px}.robot-line:after{right:13px}.kv-row{display:flex;justify-content:space-between;gap:15px;font-size:12px;margin-top:10px}.kv-row span:first-child{color:var(--muted)}.vehicle{padding:20px 22px}.state-display{display:flex;gap:12px;align-items:center;padding-bottom:19px;border-bottom:1px solid var(--line);margin-bottom:17px}.state-orb{width:42px;height:42px;background:#bbef8310;border:1px solid #536b43;border-radius:50%;display:grid;place-items:center;color:var(--green);font-size:20px}.state-display strong{font-size:20px;font-weight:450;letter-spacing:-.03em}.state-display small{display:block;color:var(--muted);font-size:11px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 22px}.status-grid label{font-size:10px;color:var(--muted);display:block;margin-bottom:3px}.status-grid b{font-weight:450;font-size:12px}.fault-list{padding:18px 22px 20px}.fault-clear{display:flex;gap:11px;align-items:center;margin:3px 0 16px}.check{border:1px solid #5a7843;color:var(--green);border-radius:50%;width:28px;height:28px;display:grid;place-items:center}.fault-clear b{font-size:12px;font-weight:500}.fault-clear small{font-size:11px;color:var(--muted);display:block}.fault-tags{display:flex;flex-wrap:wrap;gap:6px}.fault-tag{font-size:9px;letter-spacing:.06em;padding:4px 7px;background:#121713;border:1px solid #2b352e;border-radius:4px;color:#8a998d}.fault-tag.triggered{color:var(--red);border-color:#82564e;background:#3c2420}.fault-tag.advisory{color:var(--amber);border-color:#79623a;background:#302a1e}.activity{padding:12px 22px 19px;max-height:230px;overflow:auto}.event{display:grid;grid-template-columns:7px 1fr auto;gap:9px;align-items:baseline;padding:9px 0;border-bottom:1px solid #273029;font-size:11px}.event:last-child{border:0}.event .dot{width:5px;height:5px;background:var(--muted)}.event.warning .dot{background:var(--amber)}.event.error .dot{background:var(--red)}.event time{font-size:10px;color:var(--muted);white-space:nowrap}.explorer{margin-top:18px}.explorer summary{padding:18px 22px;cursor:pointer;font-size:13px}.explorer summary span{color:var(--muted);font-size:11px;margin-left:10px}.explorer-inner{padding:0 22px 20px}.search{width:100%;background:#101612;border:1px solid var(--line);border-radius:7px;color:var(--text);padding:9px 12px;margin-bottom:13px}.fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:7px;overflow:hidden}.field{background:var(--panel);padding:11px 13px;min-width:0}.field label{color:var(--muted);font-size:10px;display:block;overflow-wrap:anywhere}.field b{font-size:13px;font-weight:450}.wire{font-size:11px;color:var(--muted);padding-top:15px;overflow-wrap:anywhere}.footer{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:10px;margin-top:20px}.footer span:last-child{text-align:right}.paused .card{border-color:#5c523a}.custom-mode .robot-panel,.custom-mode #wheel-legend{display:none}.custom-mode .workspace{grid-template-columns:1fr}.custom-mode .right-col{display:none}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(min-width:1400px){.chart-wrap{height:290px}.stat{min-height:150px}.activity{max-height:245px}}
+@media(max-width:1000px){.workspace{grid-template-columns:1.5fr 1fr}.two-up{grid-template-columns:1fr}.fields{grid-template-columns:repeat(3,1fr)}.stat{padding:17px}.stat .metric{font-size:30px}.stat-icon{display:none}.header-right .mono{display:none}.legend{gap:9px}.chart-settings{align-items:flex-start;flex-direction:column}}
+@media(max-width:700px){header{height:67px}.brand small{display:none}.header-right{gap:8px}main{padding:25px 4%}.intro{align-items:start;flex-direction:column}.actions{width:100%}.actions button{flex:1}.stats{grid-template-columns:1fr 1fr;gap:10px}.stat{min-height:125px}.workspace{grid-template-columns:1fr}.two-up{grid-template-columns:1fr 1fr}.fields{grid-template-columns:1fr 1fr}.chart-wrap{height:230px}.footer{flex-direction:column}.footer span:last-child{text-align:left}.status-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:430px){.two-up{grid-template-columns:1fr}.header-right #clock{display:none}.status-grid{grid-template-columns:1fr 1fr}.chart-head{align-items:flex-start}.legend{font-size:10px}}
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/" aria-label="Motor-Wheel telemetry home"><span class="mark" aria-hidden="true"></span><span>MOTOR / WHEEL<br><small>ROBOTICS TELEMETRY</small></span></a>
+  <div class="header-right"><span class="mono muted" id="clock">—</span><span class="pill" id="connection" role="status"><i class="dot"></i><span>Connecting</span></span></div>
+</header>
+<main>
+  <div class="intro"><div><div class="eyebrow">Mission control <span class="muted">/</span> Live overview</div><h1>Every movement. In view.</h1><p class="muted" id="subtitle">Your robot’s live readings, decoded automatically.</p></div><div class="actions"><button id="pause" aria-pressed="false">Ⅱ &nbsp; Pause view</button><button id="export" disabled>↓ &nbsp; Export CSV</button></div></div>
+  <div id="banner" class="connection-banner" role="status">Waiting for the dashboard service…</div>
+  <section class="stats" aria-label="Key readings">
+    <article class="card stat"><div class="eyebrow" id="metric-label-0">Ground speed</div><span class="stat-icon" aria-hidden="true">↗</span><div class="metric mono"><span id="speed">—</span><span class="unit" id="metric-unit-0">mm/s</span></div><small id="direction">Waiting for readings</small></article>
+    <article class="card stat"><div class="eyebrow" id="metric-label-1">Distance</div><span class="stat-icon" aria-hidden="true">↔</span><div class="metric mono"><span id="distance">—</span><span class="unit" id="metric-unit-1">mm</span></div><small id="distance-note">Modulo 4,096 mm</small></article>
+    <article class="card stat"><div class="eyebrow" id="metric-label-2">Obstacle clearance</div><span class="stat-icon" aria-hidden="true">⌁</span><div class="metric mono"><span id="range">—</span><span class="unit" id="metric-unit-2">cm</span></div><small id="range-note">Ultrasonic range</small></article>
+    <article class="card stat"><div class="eyebrow">Telemetry stream</div><span class="stat-icon" aria-hidden="true">◉</span><div class="metric mono"><span id="rate">—</span><span class="unit">Hz</span></div><small><span id="packets">0</span> packets · <span id="age">no data</span></small></article>
+  </section>
+  <div class="workspace">
+    <div class="left-col">
+      <section class="card"><div class="card-head chart-head"><div><h2 id="chart-title">Motion over time</h2><p class="subhead">Live readings · rolling history</p></div><div class="segments" aria-label="Chart time window"><button data-window="15" aria-pressed="false">15s</button><button class="active" data-window="30" aria-pressed="true">30s</button><button data-window="60" aria-pressed="false">60s</button></div></div>
+        <div class="chart-settings"><div class="legend" id="wheel-legend"><span><i></i>Ground</span><span><i></i>Left wheel</span><span><i></i>Right wheel</span></div><label><span class="sr-only">Chart reading</span><select id="chart-field"><option value="__motion">Wheel speeds · mm/s</option></select></label></div>
+        <div class="chart-wrap"><canvas id="chart" role="img" aria-label="Telemetry history chart. Current readings are displayed in the metric cards and decoded fields below."></canvas><div class="empty-chart" id="empty-chart">Waiting for telemetry<small>Readings will appear automatically.</small></div></div>
+        <div class="chart-foot"><span id="chart-caption">Speed · mm/s</span><span class="mono" id="chart-span">Last 30 seconds</span></div>
+      </section>
+      <div class="two-up robot-panel">
+        <section class="card"><div class="card-head"><h2>Line sensors</h2><span class="eyebrow">ADC / 4095</span></div><div class="sensors"><div class="sensor-row"><span>Left</span><div class="track"><div class="fill" id="ir-left-bar"></div></div><span class="sensor-value mono" id="ir-left">—</span></div><div class="sensor-row"><span>Centre</span><div class="track"><div class="fill" id="ir-centre-bar"></div></div><span class="sensor-value mono" id="ir-centre">—</span></div><div class="sensor-row"><span>Right</span><div class="track"><div class="fill" id="ir-right-bar"></div></div><span class="sensor-value mono" id="ir-right">—</span></div><div class="sensor-foot"><span id="line-state">Waiting</span><span>Error <b class="mono" id="line-error">—</b></span></div></div></section>
+        <section class="card"><div class="card-head"><h2>Terrain & attitude</h2><span class="eyebrow" id="terrain-state">Waiting</span></div><div class="terrain"><div class="pitch-visual" aria-hidden="true"><div class="robot-line" id="robot-pitch"></div></div><div class="kv-row"><span>Pitch</span><span class="mono" id="pitch">—</span></div><div class="kv-row"><span>Peak height</span><span class="mono" id="peak">—</span></div><div class="kv-row"><span>On hump</span><span id="hump">—</span></div></div></section>
+      </div>
+    </div>
+    <div class="right-col">
+      <section class="card robot-panel"><div class="card-head"><h2>Robot state</h2><span class="eyebrow" id="protocol">V1 PROTOCOL</span></div><div class="vehicle"><div class="state-display"><span class="state-orb" aria-hidden="true">⌘</span><div><strong id="vehicle">Waiting</strong><small id="motion-mode">No telemetry received</small></div></div><div class="status-grid"><div><label>WiFi / MQTT</label><b id="robot-links">— / —</b></div><div><label>Obstacle routine</label><b id="obstacle">—</b></div><div><label>Left encoder</label><b class="mono" id="encoder-left">—</b></div><div><label>Right encoder</label><b class="mono" id="encoder-right">—</b></div><div><label>Servo angle</label><b id="servo">—</b></div><div><label>Last barcode</label><b id="barcode">—</b></div></div></div></section>
+      <section class="card robot-panel"><div class="card-head"><h2>Fault monitor</h2><span class="mono muted" id="fault-mask">—</span></div><div class="fault-list"><div class="fault-clear"><span class="check" id="fault-icon">·</span><div><b id="fault-title">Waiting for fault status</b><small id="fault-detail">12 monitored fault flags</small></div></div><div class="fault-tags" id="fault-tags"></div></div></section>
+      <section class="card"><div class="card-head"><h2>Stream activity</h2><span class="eyebrow" id="rejected">0 REJECTED</span></div><div class="activity" id="activity"><p class="subhead">Connection and decoder events appear here.</p></div></section>
+    </div>
+  </div>
+  <details class="card explorer" id="explorer"><summary>Decoded field explorer <span id="field-count">All readings · raw packet</span></summary><div class="explorer-inner"><label class="sr-only" for="field-search">Filter decoded fields</label><input class="search" id="field-search" placeholder="Find a field…" type="search"><div class="fields" id="fields"></div><p class="wire mono" id="wire">No packet received yet.</p></div></details>
+  <footer class="footer"><span><span class="good">●</span> MOTOR-WHEEL <span class="muted">/</span> <span id="source">Connecting to local service</span></span><span id="footer-detail">Receive-only dashboard · 28-byte binary telemetry</span></footer>
+</main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const names = {vehicle:['Boot','Idle','Following line','Reading barcode','Crossing hump','Avoiding obstacle','Searching','Fault latched'],motion_mode:['Idle','Line following','Moving','Turning','Stalled','Emergency stop','Initializing'],terrain:['Calibrating','Level','Climbing','Cresting','Descending','Impact','Sensor fault'],line_state:['Calibrating','Tracking','Searching','Junction','Scanning','Decoding'],obstacle_state:['Idle','Coarse scan','Fine scan','Planning','Bypassing','Recovering','Aborted'],barcode_command:['Left','Right','Straight','U-turn']};
+const faultNames=['STALL','ENCODER','IMU','NO ECHO','WIFI','IMPACT','E-STOP','WATCHDOG','RANGE','TIMEOUT','QUEUE','MQTT'];
+let state=null, samples=[], paused=false, windowSeconds=30, selected='__motion', fieldSignature='', displayed=null, offset=0, timer=null;
+const fmt = value => value === undefined || value === null ? '—' : typeof value === 'number' ? value.toLocaleString(undefined,{maximumFractionDigits:2}) : String(value);
+const put = (id,value) => {$(id).textContent=fmt(value)};
+const label = (field,value) => names[field]?.[value] ?? fmt(value);
+const human = key => key.replaceAll('_',' ');
+const number = value => typeof value === 'number' && Number.isFinite(value);
+faultNames.forEach((name,i)=>{const span=document.createElement('span');span.className='fault-tag';span.textContent=name;span.id=`fault-${i}`;$('fault-tags').append(span)});
+function render(s){
+  displayed=s;
+  const v=s.latest?.values ?? {}, isFresh=!s.stale && s.connection==='connected';
+  document.body.classList.toggle('custom-mode',s.custom);
+  $('connection').className='pill '+(s.demo?'warn':isFresh?'good':s.connection==='connected'?'warn':'bad');
+  $('connection').lastElementChild.textContent=s.demo?'Demo mode':isFresh?'Live telemetry':s.connection==='connected'?'Waiting for robot':'MQTT '+s.connection;
+  $('banner').hidden=isFresh && !s.demo && !paused;
+  $('banner').textContent=paused?'View paused. Telemetry continues collecting. Resume to see current readings.':s.demo?'DEMO MODE · Simulated readings. No robot is connected.':s.connection!=='connected'?s.connection_detail+' · Confirm the broker is running and reachable.':s.latest?'Telemetry is stale. Last readings remain visible; check robot power, WiFi and MQTT.':'Subscribed and waiting for telemetry. Start the robot with MQTT enabled on the same broker.';
+  put('rate',s.rate);put('packets',s.received);put('age',s.age===null?'no data':s.age<1?'just now':`${s.age.toFixed(1)}s ago`);
+  put('rejected',`${s.rejected} REJECTED`);
+  $('source').textContent=s.demo?'SIMULATED SOURCE':`${s.broker} · ${s.topics.telemetry}`;
+  $('subtitle').textContent=s.custom?'Your Python decoder. Every field, automatically.':'Your robot’s live readings, decoded automatically.';
+  $('footer-detail').textContent=`Receive-only · ${s.custom?'custom Python decoder':'28-byte binary telemetry'} · ${s.retained} retained ignored`;
+  if(s.custom){
+    const keys=Object.keys(v).filter(k=>number(v[k])).slice(0,3);
+    ['speed','distance','range'].forEach((id,i)=>{put(`metric-label-${i}`,keys[i]?human(keys[i]):'Reading');put(`metric-unit-${i}`,'');put(id,keys[i]?v[keys[i]]:undefined)});
+    ['direction','distance-note','range-note'].forEach(id=>put(id,'Custom decoder field'));
+    $('explorer').open=true;
+  }else{
+    put('speed',number(v.speed_mm_second)?v.speed_mm_second*(v.reverse?-1:1):undefined);put('direction',s.latest?(v.reverse?'Reverse travel':'Forward travel'):'Waiting for readings');
+    put('distance',v.distance_mm);put('range',v.range_cm===0?undefined:v.range_cm);put('range-note',v.range_cm===0?'No valid echo':'Ultrasonic range');
+    put('vehicle',label('vehicle',v.vehicle));put('motion-mode',label('motion_mode',v.motion_mode));put('protocol',v.version?`V${v.version} PROTOCOL`:'V1 PROTOCOL');
+    put('obstacle',label('obstacle_state',v.obstacle_state));put('encoder-left',v.encoder_left);put('encoder-right',v.encoder_right);put('servo',v.servo_deg===undefined?undefined:`${v.servo_deg}°`);
+    put('barcode',v.barcode_valid?label('barcode_command',v.barcode_command):'No valid code');
+    put('robot-links',v.link===undefined?'— / —':`${v.link&1?'Up':'Down'} / ${v.link&2?'Up':'Down'}`);
+    for(const side of ['left','centre','right']){put(`ir-${side}`,v[`ir_${side}`]);$(`ir-${side}-bar`).style.width=`${Math.max(0,Math.min(100,(v[`ir_${side}`]??0)/4095*100))}%`}
+    put('line-state',label('line_state',v.line_state));put('line-error',v.line_error);put('terrain-state',label('terrain',v.terrain));put('pitch',v.pitch_deg===undefined?undefined:`${v.pitch_deg}°`);
+    $('robot-pitch').style.transform=`rotate(${-Number(v.pitch_deg??0)}deg)`;put('peak',v.height_valid?`${v.peak_mm} mm`:'Not valid');put('hump',v.on_hump===undefined?undefined:v.on_hump?'Yes':'No');
+    const mask=v.faults??0, fatal=mask&0x7ef;
+    put('fault-mask',v.faults===undefined?'—':`0x${mask.toString(16).padStart(3,'0').toUpperCase()}`);
+    put('fault-icon',v.faults===undefined?'·':mask?'!':'✓');
+    $('fault-icon').style.color=mask?(fatal?'var(--red)':'var(--amber)'):'var(--green)';
+    put('fault-title',v.faults===undefined?'Waiting for fault status':fatal?'Latched faults detected':mask?'Network advisory':'All fault flags clear');
+    put('fault-detail',v.faults===undefined?'12 monitored fault flags':fatal?'Check robot before continuing':mask?'WiFi / MQTT advisory flags active':'No reported faults');
+    faultNames.forEach((_,i)=>{$(`fault-${i}`).className='fault-tag'+(mask&(1<<i)?(i===4||i===11?' advisory':' triggered'):'')});
+  }
+  const signature=Object.keys(v).sort().join('|');
+  if(signature!==fieldSignature){
+    fieldSignature=signature;
+    const previous=selected;
+    $('chart-field').replaceChildren();
+    if(!s.custom){const option=new Option('Wheel speeds · mm/s','__motion');$('chart-field').add(option)}
+    Object.keys(v).filter(k=>number(v[k])).forEach(k=>$('chart-field').add(new Option(human(k),k)));
+    selected=[...$('chart-field').options].some(o=>o.value===previous)?previous:$('chart-field').options[0]?.value??'';
+    $('chart-field').value=selected;
+  }
+  put('chart-title',selected==='__motion'?'Motion over time':selected?human(selected):'Readings over time');
+  $('wheel-legend').style.visibility=selected==='__motion'?'visible':'hidden';
+  put('chart-caption',selected==='__motion'?'Speed · mm/s':human(selected));
+  $('activity').replaceChildren();
+  if(!s.events.length){const p=document.createElement('p');p.className='subhead';p.textContent='Connection and decoder events appear here.';$('activity').append(p)}
+  s.events.forEach(e=>{const row=document.createElement('div');row.className='event '+e.level;const dot=document.createElement('i');dot.className='dot';const msg=document.createElement('span');msg.textContent=e.message;const t=document.createElement('time');t.textContent=new Date(e.time*1000).toLocaleTimeString([],{hour12:false});row.append(dot,msg,t);$('activity').append(row)});
+  renderFields();drawChart();
+}
+function renderFields(){
+  const v=displayed?.latest?.values??{}, query=$('field-search').value.toLowerCase();
+  $('fields').replaceChildren();
+  Object.entries(v).filter(([key])=>key.toLowerCase().includes(query)).forEach(([key,value])=>{const item=document.createElement('div');item.className='field';const name=document.createElement('label');name.textContent=key;const val=document.createElement('b');val.className='mono';val.textContent=fmt(value);item.append(name,val);$('fields').append(item)});
+  put('field-count',`${Object.keys(v).length} decoded fields · raw packet`);put('wire',displayed?.latest?`HEX / ${displayed.latest.hex}`:'No packet received yet.');
+}
+function drawChart(){
+  const canvas=$('chart'),rect=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  canvas.width=rect.width*dpr;canvas.height=rect.height*dpr;
+  const c=canvas.getContext('2d');c.scale(dpr,dpr);
+  const w=rect.width,h=rect.height,pad={l:45,r:12,t:20,b:30},iw=w-pad.l-pad.r,ih=h-pad.t-pad.b;
+  const end=paused?(displayed?.server_time??Date.now()/1000):Date.now()/1000+offset;
+  const data=samples.filter(s=>s.time>=end-windowSeconds&&s.time<=end);
+  const series=selected==='__motion'?[
+    {color:'#bbef83',get:v=>number(v.speed_mm_second)?v.speed_mm_second*(v.reverse?-1:1):null},
+    {color:'#89c8ef',get:v=>v.wheel_left_mm_second},{color:'#f5ca79',get:v=>v.wheel_right_mm_second}
+  ]:[{color:'#bbef83',get:v=>v[selected]}];
+  const values=series.flatMap(line=>data.map(s=>line.get(s.values)).filter(number));
+  $('empty-chart').hidden=values.length>0;
+  // display:grid in CSS requires an explicit display override for the hidden state.
+  $('empty-chart').style.display=values.length?'none':'grid';
+  let low=values.length?Math.min(0,...values):0,high=values.length?Math.max(...values):500;
+  if(high===low)high=low+1;
+  const spread=high-low;high+=spread*.12;if(low<0)low-=spread*.08;
+  const x=t=>pad.l+(t-(end-windowSeconds))/windowSeconds*iw,y=v=>pad.t+(high-v)/(high-low)*ih;
+  c.font='10px ui-monospace,monospace';c.lineWidth=1;
+  for(let i=0;i<=4;i++){const value=low+(high-low)*i/4,yy=y(value);c.strokeStyle='#2b352d';c.beginPath();c.moveTo(pad.l,yy);c.lineTo(w-pad.r,yy);c.stroke();c.fillStyle='#91a093';c.textAlign='right';c.fillText(Math.round(value).toLocaleString(),pad.l-9,yy+3)}
+  for(let i=0;i<=4;i++){c.textAlign=i===0?'left':i===4?'right':'center';c.fillStyle='#91a093';c.fillText(i===4?'now':`−${Math.round(windowSeconds*(1-i/4))}s`,pad.l+iw*i/4,h-9)}
+  c.save();c.beginPath();c.rect(pad.l,pad.t,iw,ih);c.clip();
+  series.forEach(line=>{c.strokeStyle=line.color;c.lineWidth=1.8;c.lineJoin='round';c.beginPath();let previous=null;data.forEach(s=>{const value=line.get(s.values);if(!number(value)){previous=null;return}if(!previous||s.time-previous>2)c.moveTo(x(s.time),y(value));else c.lineTo(x(s.time),y(value));previous=s.time});c.stroke();const last=data.at(-1);if(last&&number(line.get(last.values))){c.fillStyle=line.color;c.beginPath();c.arc(x(last.time),y(line.get(last.values)),3,0,Math.PI*2);c.fill()}});
+  c.restore();
+}
+async function poll(){
+  try{
+    const response=await fetch(`/api/state?since=${samples.at(-1)?.id??0}`,{cache:'no-store',signal:AbortSignal.timeout(5000)});
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    const next=await response.json();
+    if(state&&next.started!==state.started)samples=[];
+    const lastId=samples.at(-1)?.id??0;
+    samples.push(...next.samples.filter(sample=>sample.id>lastId));samples=samples.slice(-1200);
+    state=next;offset=next.server_time-Date.now()/1000;
+    $('export').disabled=!samples.length;
+    if(!paused)render(state);
+  }catch(error){$('banner').hidden=false;$('banner').textContent='Dashboard service unavailable. Keep the Python launcher running; reconnecting automatically.';$('connection').className='pill bad';$('connection').lastElementChild.textContent='Service offline'}
+  timer=setTimeout(poll,250);
+}
+$('pause').addEventListener('click',()=>{paused=!paused;document.body.classList.toggle('paused',paused);$('pause').textContent=paused?'▶   Resume view':'Ⅱ   Pause view';$('pause').setAttribute('aria-pressed',String(paused));if(state&&!paused)render(state);if(paused){$('banner').hidden=false;$('banner').textContent='View paused. Telemetry continues collecting. Resume to see current readings.'}});
+document.querySelectorAll('[data-window]').forEach(b=>b.addEventListener('click',()=>{windowSeconds=Number(b.dataset.window);document.querySelectorAll('[data-window]').forEach(el=>{el.classList.toggle('active',el===b);el.setAttribute('aria-pressed',String(el===b))});put('chart-span',`Last ${windowSeconds} seconds`);drawChart()}));
+$('chart-field').addEventListener('change',e=>{selected=e.target.value;if(displayed)render(displayed)});
+$('field-search').addEventListener('input',renderFields);
+$('export').addEventListener('click',()=>{
+  const keys=[...new Set(samples.flatMap(s=>Object.keys(s.values)))];
+  // Prefix spreadsheet formulas supplied by a custom decoder.
+  const cell=v=>{let text=String(v??'');if(typeof v==='string'&&/^[=+@\-\t\r]/.test(text))text="'"+text;return '"'+text.replaceAll('"','""')+'"'};
+  const rows=[['timestamp',...keys],...samples.map(s=>[new Date(s.time*1000).toISOString(),...keys.map(k=>s.values[k])])];
+  const url=URL.createObjectURL(new Blob([rows.map(row=>row.map(cell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;a.download=`motor-wheel-${new Date().toISOString().replaceAll(':','-')}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+new ResizeObserver(drawChart).observe($('chart'));
+setInterval(()=>put('clock',new Date().toLocaleTimeString([],{hour12:false})),1000);
+poll();
+</script>
+</body>
+</html>

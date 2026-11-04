@@ -11,11 +11,16 @@
 
 /* Mounting: which chip axis (0 = X, 1 = Y, 2 = Z) points forward, left and
  * up on the car, and whether it reads positive in that direction.
- * PROVISIONAL: set from the static tilt test (bench step 4). */
-#define TERRAIN_AXIS_FORWARD 0u
-#define TERRAIN_AXIS_LEFT 1u
+ * MEASURED 29 Oct (nose_hold_20261029_160051.csv vs firstcheck): nose up
+ * ~7.5 deg moved chip Y by -132 mg, X unchanged, so forward = -Y. Z reads
+ * +955 mg at rest, so up = +Z. The GY-511 sits rotated 90 deg on the plate.
+ * Left = +X: side lift moved X by +85 mg (now_check_20261029_160213.csv) and
+ * the left-wheel ramp run read about +100 mg (lefthump_motor_20261029_162018).
+ * The left sign does not affect pitch or height. */
+#define TERRAIN_AXIS_FORWARD 1u
+#define TERRAIN_AXIS_LEFT 0u
 #define TERRAIN_AXIS_UP 2u
-#define TERRAIN_SIGN_FORWARD 1
+#define TERRAIN_SIGN_FORWARD -1
 #define TERRAIN_SIGN_LEFT 1
 #define TERRAIN_SIGN_UP 1
 
@@ -45,6 +50,40 @@
  * PROVISIONAL: must sit below the measured ramp angle with margin. */
 #define TERRAIN_CLIMB_ENTER_MILLI 87
 #define TERRAIN_CLIMB_EXIT_MILLI 35
+/* Distance between the two wheels' tyre centres. Height = this x sin(lean), so
+ * every reported peak scales with it. Kept apart from ROBOT_TRACK_MM (280),
+ * which Navigation's turns depend on and which is not the car's real width.
+ * Measured 4 Nov with a phone: about 120 mm. PROVISIONAL until the block test
+ * confirms it (test guide, part 2). */
+#define TERRAIN_TRACK_MM 120u
+/* One-wheel humps: a lean above 2.5 deg for a short travel counts as a hump.
+ * A roof-shaped ramp peaks only for a moment and the filters lag, so the level
+ * has to sit well below the real peak lean. PROVISIONAL: tune from ramp logs.
+ */
+#define TERRAIN_SIDE_ENTER_MILLI 44
+/* Below 1.5 deg the car counts as upright, for starting and ending a hump. */
+#define TERRAIN_SIDE_EXIT_MILLI 26
+/* Travel above ENTER to confirm. Must stay below 64 (6-bit counter). */
+#define TERRAIN_SIDE_CONFIRM_MM 30u
+/* A hump ends after the lean stays low for this long. "Low" is under EXIT or
+ * under this percentage of the peak, because the flat-floor lean while driving
+ * can sit above EXIT. One ramp was split in two without the time limit. */
+#define TERRAIN_SIDE_END_MS 300u
+#define TERRAIN_SIDE_END_PERCENT 40
+/* The two lean filters. A compromise from a model using the noise measured on
+ * the ramp log (about 60 mg): slower filters read a short ramp low and can
+ * miss it at speed, while faster ones give false humps on the flat.
+ * PROVISIONAL. */
+#define TERRAIN_SIDE_FAST_DIVISOR 6
+#define TERRAIN_SIDE_FILTER_DIVISOR 4
+/* No confirming while the yaw rate is above this: curves lean the reading.
+ * Line steering wobbles the wheels on the straight, so this must stay above
+ * that wobble (check wheel_diff_mm_s in the line-follow log). PROVISIONAL. */
+#define TERRAIN_SIDE_TURN_DPS 60
+/* No confirming while speeding up or braking: the car rocks at those moments.
+ * Compared with accel_kin_mg, which reads high (see the timing note in the
+ * test guide). PROVISIONAL. */
+#define TERRAIN_SIDE_ACCEL_MG 120
 /* Travel above 5 deg needed to confirm a hump (rejects short spikes).
  * Must stay below 64 (6-bit counter). PROVISIONAL. */
 #define TERRAIN_CONFIRM_MM 20u

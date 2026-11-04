@@ -38,6 +38,11 @@
 
 #define TERRAIN_AXES 3u
 
+/* Which wheel went up. NONE: the last hump was a whole-car (nose-up) hump. */
+#define TERRAIN_WHEEL_NONE 0u
+#define TERRAIN_WHEEL_LEFT 1u
+#define TERRAIN_WHEEL_RIGHT 2u
+
 /** @brief One 10-ms sample, gathered by the caller from IMU and Motion. */
 typedef struct
 {
@@ -59,30 +64,35 @@ typedef struct
  */
 typedef struct
 {
-    uint32_t state : 3;          /* TERRAIN_CALIBRATING..SENSOR_FAULT */
-    uint32_t motion : 3;         /* TERRAIN_MOTION_* */
-    uint32_t failures : 2;       /* consecutive I2C failures, 0..3 */
-    uint32_t cal_samples : 6;    /* still samples collected, 0..32 */
-    uint32_t stale_run : 4;      /* consecutive stale Motion samples, 0..15 */
-    uint32_t confirm_mm : 6;     /* travel above 5 deg while arming, 0..63 */
-    uint32_t last_distance : 12; /* odometer at the last used sample */
-    uint32_t phase_ms : 14;      /* time in the current phase, 0..10000 */
-    uint32_t hump_ms : 14;       /* time since the hump started, 0..10000 */
-    uint32_t gate_ms : 9;        /* landing-gate time left, 0..300 */
-    uint32_t impact_run : 2;     /* samples above impact threshold, 0..3 */
-    uint32_t pitch_field : 7;    /* telemetry pitch, 0.5 deg, offset 64 */
-    uint32_t hump_peak_mm : 8;   /* peak of the last finished hump */
-    uint32_t run_peak_mm : 8;    /* highest valid peak of the run */
-    bool     b_calibrated : 1;   /* boot calibration has completed */
-    bool     b_arming : 1;       /* nose above 2 deg, hump not confirmed */
-    bool     b_wait_flat : 1;    /* hump ended: re-arm only after flat */
-    bool     b_on_hump : 1;      /* ON_HUMP: confirmed climb until LEVEL */
-    bool     b_hump_valid : 1;   /* current/last hump is trustworthy */
-    bool     b_peak_valid : 1;   /* run_peak_mm comes from a valid hump */
-    bool     b_have_last : 1;    /* last_distance holds a real sample */
-    bool     b_started : 1;      /* event this step: hump confirmed */
-    bool     b_finished : 1;     /* event this step: hump ended */
-    bool     b_impact : 1;       /* event this step: impact detected */
+    uint32_t state : 3;           /* TERRAIN_CALIBRATING..SENSOR_FAULT */
+    uint32_t motion : 3;          /* TERRAIN_MOTION_* */
+    uint32_t failures : 2;        /* consecutive I2C failures, 0..3 */
+    uint32_t cal_samples : 6;     /* still samples collected, 0..32 */
+    uint32_t stale_run : 4;       /* consecutive stale Motion samples, 0..15 */
+    uint32_t confirm_mm : 6;      /* travel above 5 deg while arming, 0..63 */
+    uint32_t last_distance : 12;  /* odometer at the last used sample */
+    uint32_t phase_ms : 14;       /* time in the current phase, 0..10000 */
+    uint32_t hump_ms : 14;        /* time since the hump started, 0..10000 */
+    uint32_t gate_ms : 9;         /* landing-gate time left, 0..300 */
+    uint32_t impact_run : 2;      /* samples above impact threshold, 0..3 */
+    uint32_t pitch_field : 7;     /* telemetry pitch, 0.5 deg, offset 64 */
+    uint32_t hump_peak_mm : 8;    /* peak of the last finished hump */
+    uint32_t run_peak_mm : 8;     /* highest valid peak of the run */
+    bool     b_calibrated : 1;    /* boot calibration has completed */
+    bool     b_arming : 1;        /* nose above 2 deg, hump not confirmed */
+    bool     b_wait_flat : 1;     /* hump ended: re-arm only after flat */
+    bool     b_side : 1;          /* current hump is a one-wheel (lean) hump */
+    bool     b_side_wait : 1;     /* hump ended: re-arm only after upright */
+    bool     b_confirm_left : 1;  /* side of the lean being confirmed */
+    uint32_t side_wheel : 2;      /* TERRAIN_WHEEL_*, of current/last hump */
+    uint32_t side_confirm_mm : 6; /* travel leaning over the level, 0..63 */
+    bool     b_on_hump : 1;       /* ON_HUMP: confirmed climb until LEVEL */
+    bool     b_hump_valid : 1;    /* current/last hump is trustworthy */
+    bool     b_peak_valid : 1;    /* run_peak_mm comes from a valid hump */
+    bool     b_have_last : 1;     /* last_distance holds a real sample */
+    bool     b_started : 1;       /* event this step: hump confirmed */
+    bool     b_finished : 1;      /* event this step: hump ended */
+    bool     b_impact : 1;        /* event this step: impact detected */
     bool     b_motion_changed : 1; /* event this step: motion changed */
     bool     b_request_init : 1;   /* caller must (re)initialise the chip */
     int16_t  height_cmm;           /* running height of this hump, 0.01 mm */
@@ -94,7 +104,14 @@ typedef struct
     int16_t  sin_milli;            /* pitch vs flat baseline, sin x 1000 */
     int16_t  turn_dps;             /* yaw rate from wheel speeds, deg/s */
     int32_t  baseline_x256;        /* flat-ground forward reading, mg x 256 */
-    int32_t  cal_forward_sum;      /* calibration sums, mg */
+    int16_t  side_arm_peak_cmm;    /* highest height while confirming */
+    int16_t  left_x6;              /* filtered left accel, mg x 6 */
+    int16_t  turn_x6;              /* filtered right - left wheel, mm/s x 6 */
+    int16_t  roll_x4;              /* second lean filter, sin x 1000 x 4 */
+    int16_t  roll_milli;           /* lean vs flat, sin x 1000, + = left up */
+    int32_t  baseline_left_x256;   /* flat-ground left reading, mg x 256 */
+    int32_t  cal_left_sum;
+    int32_t  cal_forward_sum; /* calibration sums, mg */
     int32_t  cal_up_sum;
 } terrain_t;
 

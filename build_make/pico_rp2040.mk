@@ -100,17 +100,16 @@ ifneq ($(filter $(ENCODER_TEST),0 1),$(ENCODER_TEST))
 $(error Unknown ENCODER_TEST '$(ENCODER_TEST)'; use 0 or 1)
 endif
 
-# IMU_TEST=1 builds the motor-off IMU bring-up (Buddy 4): I2C1 scan, chip
-# identification and a CSV stream on the USB console. Motion never drives
-# the motors in this build.
+# IMU_TEST=1 builds the IMU bring-up (Buddy 4): I2C1 scan, chip
+# identification and a CSV stream on the USB console. On its own, Motion
+# never drives the motors. With MOTOR_TEST=1 as well, Gordon's START-armed
+# motor sequence drives the wheels while the IMU stream is logged.
 IMU_TEST ?= 0
 ifneq ($(filter $(IMU_TEST),0 1),$(IMU_TEST))
 $(error Unknown IMU_TEST '$(IMU_TEST)'; use 0 or 1)
 endif
-ifneq ($(filter 1,$(MOTOR_TEST) $(ENCODER_TEST)),)
-ifeq ($(IMU_TEST),1)
-$(error IMU_TEST=1 cannot be combined with MOTOR_TEST or ENCODER_TEST)
-endif
+ifeq ($(ENCODER_TEST)$(IMU_TEST),11)
+$(error IMU_TEST=1 cannot be combined with ENCODER_TEST)
 endif
 ifeq ($(ENCODER_TEST),1)
 ENCODER_TEST_SUFFIX := _encodertest

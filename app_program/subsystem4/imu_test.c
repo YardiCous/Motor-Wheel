@@ -13,7 +13,7 @@
 
 #include <tm/tmonitor.h>
 
-#define IMU_TEST_ROW_MS 50u      /* 20 Hz CSV rows */
+#define IMU_TEST_ROW_MS 20u      /* every task step, so logs can be replayed */
 #define IMU_TEST_RETRY_MS 1000u  /* look for a missing chip once a second */
 #define IMU_TEST_TIMING_MS 5000u /* worst-case timing summary period */
 /* Boot lines can be printed before the PC opens the COM port, so the scan
@@ -31,17 +31,18 @@ static void scan_bus(void);
 static void identify(imu_test_t * p_test);
 static void print_identity(const imu_test_t * p_test);
 static void sample_encoders(imu_test_t * p_test, terrain_input_t * p_input);
-static void report_events(imu_test_t * p_test, uint32_t t_ms);
-static void print_row(imu_test_t * p_test, const int16_t * p_raw,
-                      const int16_t * p_mg, uint32_t t_ms, bool b_ok);
-static uint32_t elapsed_us(uint32_t start_us);
+static const char * hump_type(const terrain_t * p_terrain);
+static void         report_events(imu_test_t * p_test, uint32_t t_ms);
+static void         print_row(imu_test_t * p_test, const int16_t * p_raw,
+                              const int16_t * p_mg, uint32_t t_ms, bool b_ok);
+static uint32_t     elapsed_us(uint32_t start_us);
 
 /** @brief Banner, bus scan and chip identity come before any CSV row. */
 void imu_test_init(imu_test_t * p_test)
 {
     *p_test = (imu_test_t){0};
     board_io_motor(0, 0);
-    tm_printf((UB *)"# IMU TEST (Buddy 4): motors disabled in this build\n");
+    tm_printf((UB *)"# IMU TEST (Buddy 4)\n");
     tm_printf((UB *)"# I2C1: GP2 SDA, GP3 SCL, 400 kHz, 3.3 V\n");
     board_io_i2c_init();
     scan_bus();
@@ -62,7 +63,8 @@ void imu_test_init(imu_test_t * p_test)
     tm_printf((UB *)"t_ms,ax_raw,ay_raw,az_raw,ax_mg,ay_mg,az_mg,a_mag_mg,"
                     "mx_raw,my_raw,mz_raw,pitch_cdeg,roll_cdeg,dist_mm,"
                     "speed_mm_s,state,motion,sin_milli,height_cmm,"
-                    "run_peak_mm,peak_valid,read_us,step_us,ok\n");
+                    "run_peak_mm,peak_valid,read_us,step_us,ok,"
+                    "accel_kin_mg,lean_milli,wheel_diff_mm_s\n");
 }
 
 /** @brief Called every 10 ms by the terrain task slot. */
@@ -220,6 +222,27 @@ static void sample_encoders(imu_test_t * p_test, terrain_input_t * p_input)
     p_input->b_motion_fresh = b_ok;
 }
 
+/** @brief Short name for the hump in the event lines. */
+static const char * hump_type(const terrain_t * p_terrain)
+{
+    const char * p_name = "whole_car";
+
+    if (TERRAIN_WHEEL_LEFT == p_terrain->side_wheel)
+    {
+        p_name = "left_wheel";
+    }
+    else if (TERRAIN_WHEEL_RIGHT == p_terrain->side_wheel)
+    {
+        p_name = "right_wheel";
+    }
+    else
+    {
+        /* Whole-car hump: the default above. */
+    }
+
+    return p_name;
+}
+
 /** @brief Hump, impact, fault and calibration events print immediately. */
 static void report_events(imu_test_t * p_test, uint32_t t_ms)
 {
@@ -227,14 +250,16 @@ static void report_events(imu_test_t * p_test, uint32_t t_ms)
 
     if (p_terrain->b_started)
     {
-        tm_printf((UB *)"# EVENT t=%u HUMP_START\n", (unsigned)t_ms);
+        tm_printf((UB *)"# EVENT t=%u HUMP_START type=%s\n", (unsigned)t_ms,
+                  (UB *)hump_type(p_terrain));
     }
 
     if (p_terrain->b_finished)
     {
-        tm_printf((UB *)"# EVENT t=%u HUMP_END peak_mm=%u valid=%u"
+        tm_printf((UB *)"# EVENT t=%u HUMP_END type=%s peak_mm=%u valid=%u"
                         " run_peak_mm=%u\n",
-                  (unsigned)t_ms, (unsigned)p_terrain->hump_peak_mm,
+                  (unsigned)t_ms, (UB *)hump_type(p_terrain),
+                  (unsigned)p_terrain->hump_peak_mm,
                   p_terrain->b_hump_valid ? 1u : 0u,
                   (unsigned)p_terrain->run_peak_mm);
     }
@@ -282,7 +307,7 @@ static void print_row(imu_test_t * p_test, const int16_t * p_raw,
     const terrain_t * p_terrain = &p_test->terrain;
 
     tm_printf((UB *)"%u,%d,%d,%d,%d,%d,%d,%u,%d,%d,%d,%d,%d,%u,%d,%u,%u,"
-                    "%d,%d,%u,%u,%u,%u,%u\n",
+                    "%d,%d,%u,%u,%u,%u,%u,%d,%d,%d\n",
               (unsigned)t_ms, (int)p_raw[0], (int)p_raw[1], (int)p_raw[2],
               (int)ax, (int)ay, (int)az, (unsigned)terrain_isqrt(total),
               (int)mag[0], (int)mag[1], (int)mag[2], (int)pitch, (int)roll,
@@ -292,7 +317,9 @@ static void print_row(imu_test_t * p_test, const int16_t * p_raw,
               (int)p_terrain->sin_milli, (int)p_terrain->height_cmm,
               (unsigned)p_terrain->run_peak_mm,
               p_terrain->b_peak_valid ? 1u : 0u, (unsigned)p_test->read_us,
-              (unsigned)p_test->step_us, b_ok ? 1u : 0u);
+              (unsigned)p_test->step_us, b_ok ? 1u : 0u,
+              (int)p_terrain->accel_kin_mg, (int)p_terrain->roll_milli,
+              (int)(p_terrain->turn_x6 / TERRAIN_SIDE_FAST_DIVISOR));
 }
 
 /** @brief Microseconds since start_us, saturated to the 16-bit field. */

@@ -10,9 +10,9 @@
 #include "lwip/timeouts.h"
 #include "cyw43_utk.h"
 #include "wifi_secrets.h"
-#include "../../../../app_program/data_formats.h"
-#include "../../../../app_program/robot_os.h"
-#include "../../../../app_program/subsystem1/telemetry.h"
+#include "../data_formats.h"
+#include "../robot_os.h"
+#include "telemetry.h"
 
 #include <string.h>
 

@@ -67,8 +67,8 @@ endif
 
 # Optional MQTT client on top of NET=lwip. Connects and publishes from the
 # same processor-1-owned task as everything else above -- see
-# lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.c. Broker address and topic
-# come from config/wifi_secrets.h (gitignored; copy from
+# app_program/subsystem1/mqtt_utk.c. Topics are in subsystem1/telemetry.h;
+# broker settings come from config/wifi_secrets.h (gitignored; copy from
 # config/wifi_secrets.example.h), same as the WiFi credentials.
 MQTT ?= 0
 ifneq ($(filter $(MQTT),0 1),$(MQTT))
@@ -461,13 +461,11 @@ mtkernel_3/cyw43/cyw43_lwip.o: $(CYW43_DRIVER_PATH)/src/cyw43_lwip.c
 ifeq ($(MQTT),1)
 
 MQTT_CORE_OBJS := ./mtkernel_3/lwip/apps/mqtt/mqtt.o
-MQTT_PORT_OBJS := ./mtkernel_3/lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.o
-$(MQTT_PORT_OBJS): CFLAGS += -std=c99 -Wall -Wextra -Werror -Wshadow -Wmissing-prototypes
 
 CFLAGS += -DTM_MQTT=1
 
-OBJS += $(MQTT_CORE_OBJS) $(MQTT_PORT_OBJS)
-C_DEPS += $(MQTT_CORE_OBJS:.o=.d) $(MQTT_PORT_OBJS:.o=.d)
+OBJS += $(MQTT_CORE_OBJS)
+C_DEPS += $(MQTT_CORE_OBJS:.o=.d)
 
 mtkernel_3/lwip/apps/mqtt/mqtt.o: $(LWIPDIR)/apps/mqtt/mqtt.c
 	@echo 'Building lwIP file: $<'

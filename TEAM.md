@@ -4,7 +4,7 @@ Assignments come from the supplied design review and Tribunal 1 documents.
 
 | Buddy | Student ID | Subsystem | Code |
 |---|---|---|---|
-| Wylie | 2500642 | Binary communications and telemetry | `app_program/subsystem1/`, `mqtt_utk.c`, `tools/dashboard/` |
+| Wylie | 2500642 | Binary communications and telemetry | `app_program/subsystem1/`, `tools/dashboard/` |
 | Gordon | 2500206 | Motion, encoders, PID | `app_program/subsystem2/` |
 | Jia Jun | 2501069 | Line and barcode perception | `app_program/subsystem3/` |
 | Ernest | 2500381 | Terrain, collision, safety | `app_program/subsystem4/` |

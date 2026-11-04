@@ -145,6 +145,12 @@ Consume one binary acknowledgement for robot/ack.
 
 Check format boundaries and safety latching before task startup.
 
+## app_program/subsystem1/mqtt_utk.h
+
+`void mqtt_utk_start(void);`
+
+Poll connection readiness from the existing WiFi service task.
+
 ## app_program/subsystem1/telemetry.h
 
 `void telemetry_begin(telemetry_t * p_receiver, uint32_t total, bool b_command_topic);`
@@ -451,9 +457,3 @@ Validate the operator movement sequence without energizing hardware.
 `int main(void);`
 
 Run boundary, fault-injection and cross-subsystem scenarios.
-
-## lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.h
-
-`void mqtt_utk_start(void);`
-
-Poll connection readiness from the existing WiFi service task.

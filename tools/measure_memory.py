@@ -42,8 +42,9 @@ def main():
         for index, (header, typename) in enumerate(TYPES):
             probe.append(f'#include "{ROOT / "app_program" / header}"')
             original = (ROOT / "app_program" / header).read_text()
-            definition = re.search(r'typedef struct\s*\{.*?\}\s*' + typename + ';',
-                                   original, re.S)[0]
+            definition = re.search(
+                r'typedef struct\s*\{[^{}]*\}\s*' + re.escape(typename) + r'\s*;',
+                original, re.S)[0]
             definition = re.sub(r'\b(?:uint(?:8|16|32)_t|bool)\s+(\w+)\s*:\s*\d+\s*;',
                                 r'uint32_t \1;', definition)
             definition = definition.replace(typename, f'memory_wide_{index}_t')

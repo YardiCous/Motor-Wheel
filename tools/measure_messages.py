@@ -2,7 +2,7 @@
 import json
 import struct
 from format_c import ROOT
-from robot_protocol import FIELDS, PACKET_BYTES
+from dashboard.robot_protocol import FIELDS, PACKET_BYTES
 
 
 def main():

@@ -46,7 +46,7 @@ def main():
         build(ROOT, executable)
         output = run(executable)
         print(output, end="")
-        from robot_protocol import decode, encode_command
+        from dashboard.robot_protocol import decode, encode_command
         vector = next(line.split()[1] for line in output.splitlines()
                       if line.startswith("VECTOR "))
         decoded = decode(bytes.fromhex(vector))

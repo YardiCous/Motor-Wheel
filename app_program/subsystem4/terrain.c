@@ -56,6 +56,11 @@
 #define TERRAIN_DEG_PER_RAD_X1000 57296
 #define TERRAIN_MILLI 1000
 #define TERRAIN_SIN_ONE_SQUARED 1000000
+/* Keeps the wheel-difference filter inside its int16_t state. */
+#define TERRAIN_TURN_DIFF_LIMIT 2000
+/* Raised wheel: track (mm) x sin x 1000 gives um; 10 um = 0.01 mm. */
+#define TERRAIN_SIDE_UM_PER_CMM 10
+#define TERRAIN_PERCENT 100
 
 static int32_t magnitude(int32_t value);
 static int32_t clamp(int32_t value, int32_t lower, int32_t upper);
@@ -66,24 +71,35 @@ static void    map_axes(const terrain_input_t * p_input, int32_t * p_forward,
 static int32_t distance_step(terrain_t *             p_terrain,
                              const terrain_input_t * p_input);
 static void    update_filters(terrain_t *             p_terrain,
-                              const terrain_input_t * p_input, int32_t forward);
+                              const terrain_input_t * p_input, int32_t forward,
+                              int32_t left);
+static void update_lean(terrain_t * p_terrain, const terrain_input_t * p_input,
+                        int32_t left);
+static int32_t turning_mg(const terrain_t * p_terrain);
+static int32_t filtered_turn_dps(const terrain_t * p_terrain);
 static void calibrate(terrain_t * p_terrain, const terrain_input_t * p_input,
-                      int32_t forward, int32_t up);
+                      int32_t forward, int32_t left, int32_t up);
 static bool check_impact(terrain_t * p_terrain, int32_t forward, int32_t left);
 static void step_hump(terrain_t * p_terrain, int32_t ds_mm);
+static void step_pitch(terrain_t * p_terrain, int32_t ds_mm);
 static void step_level(terrain_t * p_terrain, int32_t ds_mm);
-static void add_height(terrain_t * p_terrain, int32_t ds_mm);
-static void finish_hump(terrain_t * p_terrain, bool b_valid);
-static void update_baseline(terrain_t *             p_terrain,
-                            const terrain_input_t * p_input);
-static void classify(terrain_t * p_terrain, const terrain_input_t * p_input,
-                     int32_t forward);
-static void advance_timers(terrain_t * p_terrain);
+static void arm_side(terrain_t * p_terrain, int32_t ds_mm);
+static int32_t side_height(int32_t lean);
+static void    step_side(terrain_t * p_terrain);
+static void    add_height(terrain_t * p_terrain, int32_t ds_mm);
+static void    finish_hump(terrain_t * p_terrain, bool b_valid);
+static void    update_baseline(terrain_t *             p_terrain,
+                               const terrain_input_t * p_input);
+static void    classify(terrain_t * p_terrain, const terrain_input_t * p_input,
+                        int32_t forward);
+static void    advance_timers(terrain_t * p_terrain);
 
 /* Compile-time checks (C99 has no _Static_assert under -pedantic, so a
  * negative array size is used instead, as in data_formats.h). */
 typedef uint8_t terrain_confirm_fits_t
     [(TERRAIN_CONFIRM_MM <= TERRAIN_CONFIRM_MAX_MM) ? 1 : -1];
+typedef uint8_t terrain_side_confirm_fits_t
+    [(TERRAIN_SIDE_CONFIRM_MM <= TERRAIN_CONFIRM_MAX_MM) ? 1 : -1];
 typedef uint8_t terrain_cal_fits_t[(TERRAIN_CAL_SAMPLES <= 63u) ? 1 : -1];
 typedef uint8_t
     terrain_gate_fits_t[(TERRAIN_LANDING_GATE_MS <= 511u) ? 1 : -1];
@@ -132,11 +148,11 @@ void terrain_step(terrain_t * p_terrain, const terrain_input_t * p_input)
     int32_t up      = 0;
     map_axes(p_input, &forward, &left, &up);
     int32_t ds_mm = distance_step(p_terrain, p_input);
-    update_filters(p_terrain, p_input, forward);
+    update_filters(p_terrain, p_input, forward, left);
 
     if (TERRAIN_CALIBRATING == p_terrain->state)
     {
-        calibrate(p_terrain, p_input, forward, up);
+        calibrate(p_terrain, p_input, forward, left, up);
     }
     else if (check_impact(p_terrain, forward, left))
     {
@@ -401,7 +417,8 @@ static int32_t distance_step(terrain_t *             p_terrain,
  * so acceleration comes from the change in the speed filter's state.
  */
 static void update_filters(terrain_t *             p_terrain,
-                           const terrain_input_t * p_input, int32_t forward)
+                           const terrain_input_t * p_input, int32_t forward,
+                           int32_t left)
 {
     int32_t forward_x8 = p_terrain->forward_x8;
     forward_x8 += forward - (forward_x8 / TERRAIN_FAST_DIVISOR);
@@ -429,11 +446,62 @@ static void update_filters(terrain_t *             p_terrain,
                       (p_terrain->baseline_x256 / TERRAIN_BASELINE_DIVISOR);
     p_terrain->sin_milli =
         (int16_t)clamp(gravity, -TERRAIN_MG_PER_G, TERRAIN_MG_PER_G);
+    update_lean(p_terrain, p_input, left);
+}
+
+/** @brief Lean = left reading - turning force - flat baseline, filtered twice.
+ * Positive means the left side is up. The wheel difference uses the same
+ * filter as the left axis, so the two line up when subtracted.
+ */
+static void update_lean(terrain_t * p_terrain, const terrain_input_t * p_input,
+                        int32_t left)
+{
+    int32_t left_x6 = p_terrain->left_x6;
+    left_x6 += left - (left_x6 / TERRAIN_SIDE_FAST_DIVISOR);
+    p_terrain->left_x6 = (int16_t)left_x6;
+
+    if (p_input->b_motion_fresh)
+    {
+        int32_t turn_x6 = p_terrain->turn_x6;
+        int32_t difference =
+            clamp(p_input->right_mm_s - p_input->left_mm_s,
+                  -TERRAIN_TURN_DIFF_LIMIT, TERRAIN_TURN_DIFF_LIMIT);
+        turn_x6 += difference - (turn_x6 / TERRAIN_SIDE_FAST_DIVISOR);
+        p_terrain->turn_x6 = (int16_t)turn_x6;
+    }
+
+    int32_t lean = (left_x6 / TERRAIN_SIDE_FAST_DIVISOR) -
+                   turning_mg(p_terrain) -
+                   (p_terrain->baseline_left_x256 / TERRAIN_BASELINE_DIVISOR);
+    lean         = clamp(lean, -TERRAIN_MG_PER_G, TERRAIN_MG_PER_G);
+    int32_t roll = p_terrain->roll_x4;
+    roll += lean - (roll / TERRAIN_SIDE_FILTER_DIVISOR);
+    p_terrain->roll_x4    = (int16_t)roll;
+    p_terrain->roll_milli = (int16_t)(roll / TERRAIN_SIDE_FILTER_DIVISOR);
+}
+
+/** @brief Sideways force of turning: v x (vR - vL) / track, in milli-g.
+ * Dividing by the track first keeps the product inside int32_t.
+ */
+static int32_t turning_mg(const terrain_t * p_terrain)
+{
+    int32_t speed       = p_terrain->speed_x8 / TERRAIN_FAST_DIVISOR;
+    int32_t difference  = p_terrain->turn_x6 / TERRAIN_SIDE_FAST_DIVISOR;
+    int32_t accel_mm_s2 = (speed * difference) / (int32_t)TERRAIN_TRACK_MM;
+    return (accel_mm_s2 * TERRAIN_MG_PER_G) / TERRAIN_GRAVITY_MM_S2;
+}
+
+/** @brief Yaw rate from the filtered wheel difference, in deg/s. */
+static int32_t filtered_turn_dps(const terrain_t * p_terrain)
+{
+    int32_t difference = p_terrain->turn_x6 / TERRAIN_SIDE_FAST_DIVISOR;
+    return (difference * TERRAIN_DEG_PER_RAD_X1000) /
+           ((int32_t)TERRAIN_TRACK_MM * TERRAIN_MILLI);
 }
 
 /** @brief Average 32 still samples. Any movement restarts the count. */
 static void calibrate(terrain_t * p_terrain, const terrain_input_t * p_input,
-                      int32_t forward, int32_t up)
+                      int32_t forward, int32_t left, int32_t up)
 {
     int32_t smooth = p_terrain->forward_x8 / TERRAIN_FAST_DIVISOR;
     bool    b_still =
@@ -448,6 +516,7 @@ static void calibrate(terrain_t * p_terrain, const terrain_input_t * p_input,
     if (b_still && b_upright)
     {
         p_terrain->cal_forward_sum += forward;
+        p_terrain->cal_left_sum += left;
         p_terrain->cal_up_sum += up;
         ++p_terrain->cal_samples;
     }
@@ -455,6 +524,7 @@ static void calibrate(terrain_t * p_terrain, const terrain_input_t * p_input,
     {
         p_terrain->cal_samples     = 0u;
         p_terrain->cal_forward_sum = 0;
+        p_terrain->cal_left_sum    = 0;
         p_terrain->cal_up_sum      = 0;
     }
 
@@ -465,17 +535,23 @@ static void calibrate(terrain_t * p_terrain, const terrain_input_t * p_input,
         int32_t baseline =
             p_terrain->cal_forward_sum / (int32_t)TERRAIN_CAL_SAMPLES;
         p_terrain->baseline_x256 = baseline * TERRAIN_BASELINE_DIVISOR;
-        p_terrain->b_calibrated  = true;
-        p_terrain->state         = TERRAIN_LEVEL;
-        p_terrain->phase_ms      = 0u;
+        p_terrain->baseline_left_x256 =
+            (p_terrain->cal_left_sum / (int32_t)TERRAIN_CAL_SAMPLES) *
+            TERRAIN_BASELINE_DIVISOR;
+        p_terrain->roll_x4      = 0;
+        p_terrain->roll_milli   = 0;
+        p_terrain->b_calibrated = true;
+        p_terrain->state        = TERRAIN_LEVEL;
+        p_terrain->phase_ms     = 0u;
     }
 }
 
 /** @brief Returns true while in IMPACT. Entering it abandons any hump. */
 static bool check_impact(terrain_t * p_terrain, int32_t forward, int32_t left)
 {
-    bool b_landing =
-        (p_terrain->gate_ms > 0u) || (TERRAIN_DESCENDING == p_terrain->state);
+    /* A wheel dropping off a one-wheel ramp is a landing too. */
+    bool b_landing = (p_terrain->gate_ms > 0u) || (p_terrain->b_side) ||
+                     (TERRAIN_DESCENDING == p_terrain->state);
     int32_t limit = b_landing ? TERRAIN_LANDING_IMPACT_MG : TERRAIN_IMPACT_MG;
     /* Compare squares: no square root needed. 2 * 4000^2 fits int32_t. */
     int32_t horizontal = (forward * forward) + (left * left);
@@ -510,8 +586,28 @@ static bool check_impact(terrain_t * p_terrain, int32_t forward, int32_t left)
     return (TERRAIN_IMPACT == p_terrain->state);
 }
 
-/** @brief Statechart 6.5 hump phases. sin_milli is pitch vs flat. */
+/** @brief Run whichever hump logic applies, with one 10-s limit for both. */
 static void step_hump(terrain_t * p_terrain, int32_t ds_mm)
+{
+    if (p_terrain->b_side)
+    {
+        step_side(p_terrain);
+    }
+    else
+    {
+        step_pitch(p_terrain, ds_mm);
+    }
+
+    if ((p_terrain->b_on_hump) &&
+        (p_terrain->hump_ms >= TERRAIN_HUMP_TIMEOUT_MS))
+    {
+        /* Never came back down within 10 s: report it, marked invalid. */
+        finish_hump(p_terrain, false);
+    }
+}
+
+/** @brief Statechart 6.5 hump phases. sin_milli is pitch vs flat. */
+static void step_pitch(terrain_t * p_terrain, int32_t ds_mm)
 {
     int32_t sine = p_terrain->sin_milli;
 
@@ -519,6 +615,11 @@ static void step_hump(terrain_t * p_terrain, int32_t ds_mm)
     {
         case TERRAIN_LEVEL:
             step_level(p_terrain, ds_mm);
+
+            if (TERRAIN_LEVEL == p_terrain->state)
+            {
+                arm_side(p_terrain, ds_mm);
+            }
             break;
 
         case TERRAIN_CLIMBING:
@@ -579,13 +680,6 @@ static void step_hump(terrain_t * p_terrain, int32_t ds_mm)
             /* CALIBRATING, IMPACT and SENSOR_FAULT are handled elsewhere. */
             break;
     }
-
-    if ((p_terrain->b_on_hump) &&
-        (p_terrain->hump_ms >= TERRAIN_HUMP_TIMEOUT_MS))
-    {
-        /* Never came back down within 10 s: report it, marked invalid. */
-        finish_hump(p_terrain, false);
-    }
 }
 
 /** @brief Arming: count height from 2 deg, confirm after 20 mm above 5.
@@ -622,7 +716,11 @@ static void step_level(terrain_t * p_terrain, int32_t ds_mm)
 
     add_height(p_terrain, ds_mm);
 
-    if ((sine > TERRAIN_CLIMB_ENTER_MILLI) && (ds_mm > 0))
+    /* A car leaning over 3 deg is not climbing with both wheels: the nose
+     * moves around on a one-wheel ramp too, and arm_side() decides that case.
+     */
+    if ((sine > TERRAIN_CLIMB_ENTER_MILLI) && (ds_mm > 0) &&
+        (magnitude(p_terrain->roll_milli) <= TERRAIN_SIDE_ENTER_MILLI))
     {
         uint32_t travel       = p_terrain->confirm_mm + (uint32_t)ds_mm;
         p_terrain->confirm_mm = (travel > TERRAIN_CONFIRM_MAX_MM)
@@ -639,6 +737,137 @@ static void step_level(terrain_t * p_terrain, int32_t ds_mm)
         p_terrain->b_started    = true;
         p_terrain->phase_ms     = 0u;
         p_terrain->hump_ms      = 0u;
+        p_terrain->side_wheel   = TERRAIN_WHEEL_NONE;
+    }
+}
+
+/** @brief Confirm a one-wheel hump: lean over the level for a short travel.
+ * Only forward travel counts, so lifting the car by hand is not a hump. Travel
+ * while upright counts back down instead of clearing the count: on the real
+ * ramp, vibration dips the lean for a moment, while on the flat the lean is
+ * upright far more often than it is over the level. A lean changing side is
+ * rocking, not a ramp, so that restarts the count. The tallest height seen
+ * here is kept, so a short ramp's top is not lost before the hump is
+ * confirmed.
+ */
+static void arm_side(terrain_t * p_terrain, int32_t ds_mm)
+{
+    int32_t lean = magnitude(p_terrain->roll_milli);
+
+    if (lean <= TERRAIN_SIDE_EXIT_MILLI)
+    {
+        p_terrain->b_side_wait = false;
+    }
+
+    if ((p_terrain->b_side_wait) || (p_terrain->b_wait_flat) ||
+        (magnitude(filtered_turn_dps(p_terrain)) >= TERRAIN_SIDE_TURN_DPS))
+    {
+        return;
+    }
+
+    if ((ds_mm > 0) &&
+        (magnitude(p_terrain->accel_kin_mg) < TERRAIN_SIDE_ACCEL_MG))
+    {
+        int32_t travel = (int32_t)p_terrain->side_confirm_mm;
+        bool    b_left = (p_terrain->roll_milli > 0);
+
+        if (lean > TERRAIN_SIDE_ENTER_MILLI)
+        {
+            travel = (b_left == p_terrain->b_confirm_left) ? travel : 0;
+            p_terrain->b_confirm_left = b_left;
+            travel += ds_mm;
+        }
+        else if (lean <= TERRAIN_SIDE_EXIT_MILLI)
+        {
+            travel -= ds_mm;
+        }
+        else
+        {
+            /* Between the two levels: no evidence either way. */
+        }
+
+        p_terrain->side_confirm_mm =
+            (uint32_t)clamp(travel, 0, (int32_t)TERRAIN_CONFIRM_MAX_MM);
+    }
+
+    int32_t height = side_height(lean);
+
+    if (0u == p_terrain->side_confirm_mm)
+    {
+        p_terrain->side_arm_peak_cmm = 0;
+    }
+    else if (height > p_terrain->side_arm_peak_cmm)
+    {
+        p_terrain->side_arm_peak_cmm = (int16_t)height;
+    }
+    else
+    {
+        /* Still below the tallest height seen so far. */
+    }
+
+    if (p_terrain->side_confirm_mm >= TERRAIN_SIDE_CONFIRM_MM)
+    {
+        p_terrain->peak_cmm          = p_terrain->side_arm_peak_cmm;
+        p_terrain->side_arm_peak_cmm = 0;
+        p_terrain->side_confirm_mm   = 0u;
+        p_terrain->b_arming          = false;
+        p_terrain->confirm_mm        = 0u;
+        p_terrain->b_side            = true;
+        p_terrain->side_wheel        = (p_terrain->b_confirm_left)
+                                           ? TERRAIN_WHEEL_LEFT
+                                           : TERRAIN_WHEEL_RIGHT;
+        p_terrain->state             = TERRAIN_CLIMBING;
+        p_terrain->b_on_hump         = true;
+        p_terrain->b_hump_valid      = true;
+        p_terrain->b_started         = true;
+        p_terrain->phase_ms          = 0u;
+        p_terrain->hump_ms           = 0u;
+        p_terrain->height_cmm        = (int16_t)height;
+        p_terrain->carry_um          = 0;
+    }
+}
+
+/** @brief Raised wheel height from the lean: track x sin(lean), in 0.01 mm. */
+static int32_t side_height(int32_t lean)
+{
+    int32_t height =
+        ((int32_t)TERRAIN_TRACK_MM * lean) / TERRAIN_SIDE_UM_PER_CMM;
+    return clamp(height, 0, INT16_MAX);
+}
+
+/** @brief One-wheel hump: follow the lean and keep the highest height.
+ * This is the height above the floor the other wheel is on, so it needs no
+ * distance and does not depend on how long the ramp took.
+ */
+static void step_side(terrain_t * p_terrain)
+{
+    int32_t lean          = magnitude(p_terrain->roll_milli);
+    int32_t height        = side_height(lean);
+    p_terrain->height_cmm = (int16_t)height;
+
+    if (height > p_terrain->peak_cmm)
+    {
+        p_terrain->peak_cmm = (int16_t)height;
+    }
+
+    /* Vibration dips the lean for a moment mid-ramp, so the hump ends only
+     * after the lean has stayed low for a while. */
+    bool b_low = (lean < TERRAIN_SIDE_EXIT_MILLI) ||
+                 ((height * TERRAIN_PERCENT) <
+                  (p_terrain->peak_cmm * TERRAIN_SIDE_END_PERCENT));
+
+    if (!b_low)
+    {
+        p_terrain->phase_ms = 0u;
+    }
+    else if (p_terrain->phase_ms >= TERRAIN_SIDE_END_MS)
+    {
+        finish_hump(p_terrain, true);
+        p_terrain->gate_ms = TERRAIN_LANDING_GATE_MS;
+    }
+    else
+    {
+        /* Low, but not for long enough yet. */
     }
 }
 
@@ -687,15 +916,18 @@ static void finish_hump(terrain_t * p_terrain, bool b_valid)
         p_terrain->b_peak_valid = true;
     }
 
-    p_terrain->b_finished  = true;
-    p_terrain->b_on_hump   = false;
-    p_terrain->b_arming    = false;
-    p_terrain->b_wait_flat = true;
-    p_terrain->state       = TERRAIN_LEVEL;
-    p_terrain->phase_ms    = 0u;
-    p_terrain->hump_ms     = 0u;
-    p_terrain->height_cmm  = 0;
-    p_terrain->carry_um    = 0;
+    p_terrain->b_finished      = true;
+    p_terrain->b_on_hump       = false;
+    p_terrain->b_arming        = false;
+    p_terrain->b_wait_flat     = true;
+    p_terrain->b_side          = false;
+    p_terrain->b_side_wait     = true;
+    p_terrain->side_confirm_mm = 0u;
+    p_terrain->state           = TERRAIN_LEVEL;
+    p_terrain->phase_ms        = 0u;
+    p_terrain->hump_ms         = 0u;
+    p_terrain->height_cmm      = 0;
+    p_terrain->carry_um        = 0;
 }
 
 /** @brief Re-measure "flat" slowly, only when flat, level and steady.
@@ -709,7 +941,9 @@ static void update_baseline(terrain_t *             p_terrain,
         (TERRAIN_LEVEL == p_terrain->state) && (!p_terrain->b_arming) &&
         (p_input->b_motion_fresh) &&
         (magnitude(p_terrain->accel_kin_mg) < TERRAIN_BASELINE_ACCEL_MG) &&
-        (magnitude(p_terrain->sin_milli) < TERRAIN_CLIMB_EXIT_MILLI);
+        (magnitude(p_terrain->sin_milli) < TERRAIN_CLIMB_EXIT_MILLI) &&
+        (magnitude(p_terrain->roll_milli) < TERRAIN_SIDE_ENTER_MILLI) &&
+        (0u == p_terrain->side_confirm_mm);
 
     if (b_flat)
     {
@@ -717,6 +951,15 @@ static void update_baseline(terrain_t *             p_terrain,
                         p_terrain->accel_kin_mg;
         p_terrain->baseline_x256 +=
             level - (p_terrain->baseline_x256 / TERRAIN_BASELINE_DIVISOR);
+
+        if (magnitude(filtered_turn_dps(p_terrain)) < TERRAIN_SIDE_TURN_DPS)
+        {
+            int32_t side = (p_terrain->left_x6 / TERRAIN_SIDE_FAST_DIVISOR) -
+                           turning_mg(p_terrain);
+            p_terrain->baseline_left_x256 +=
+                side -
+                (p_terrain->baseline_left_x256 / TERRAIN_BASELINE_DIVISOR);
+        }
     }
 }
 
@@ -735,7 +978,7 @@ static void classify(terrain_t * p_terrain, const terrain_input_t * p_input,
         int32_t difference = p_input->right_mm_s - p_input->left_mm_s;
         p_terrain->turn_dps =
             (int16_t)((difference * TERRAIN_DEG_PER_RAD_X1000) /
-                      ((int32_t)ROBOT_TRACK_MM * TERRAIN_MILLI));
+                      ((int32_t)TERRAIN_TRACK_MM * TERRAIN_MILLI));
     }
 
     if ((!p_terrain->b_calibrated) ||

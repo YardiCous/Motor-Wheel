@@ -100,42 +100,16 @@ ifneq ($(filter $(ENCODER_TEST),0 1),$(ENCODER_TEST))
 $(error Unknown ENCODER_TEST '$(ENCODER_TEST)'; use 0 or 1)
 endif
 
-# IMU_TEST=1 builds the motor-off IMU diagnostic.
+# IMU_TEST=1 builds the IMU bring-up (Buddy 4): I2C1 scan, chip
+# identification and a CSV stream on the USB console. On its own, Motion
+# never drives the motors. With MOTOR_TEST=1 as well, Gordon's START-armed
+# motor sequence drives the wheels while the IMU stream is logged.
 IMU_TEST ?= 0
 ifneq ($(filter $(IMU_TEST),0 1),$(IMU_TEST))
 $(error Unknown IMU_TEST '$(IMU_TEST)'; use 0 or 1)
 endif
-
-# LINE_TEST=1 builds the line-sensor bench: real IR sampling and line following,
-# with a stand-in IMU and no ultrasonic. It prints the IR readings every 200 ms.
-LINE_TEST ?= 0
-ifneq ($(filter $(LINE_TEST),0 1),$(LINE_TEST))
-$(error Unknown LINE_TEST '$(LINE_TEST)'; use 0 or 1)
-endif
-ifeq ($(LINE_TEST),1)
-LINE_TEST_SUFFIX := _linetest
-endif
-# BODY_SCAN=1: with no working scan servo, Navigation turns the whole robot
-# about 45 degrees each way to measure both sides before an obstacle bypass.
-BODY_SCAN ?= 0
-ifneq ($(filter $(BODY_SCAN),0 1),$(BODY_SCAN))
-$(error Unknown BODY_SCAN '$(BODY_SCAN)'; use 0 or 1)
-endif
-ifeq ($(BODY_SCAN),1)
-BODY_SCAN_SUFFIX := _bodyscan
-endif
-# OBSTACLE_TEST=1 builds the bench obstacle bypass: a stand-in line sensor and
-# IMU let the real scan and bypass run with only motors, encoders and sensor.
-OBSTACLE_TEST ?= 0
-ifneq ($(filter $(OBSTACLE_TEST),0 1),$(OBSTACLE_TEST))
-$(error Unknown OBSTACLE_TEST '$(OBSTACLE_TEST)'; use 0 or 1)
-endif
-ifeq ($(OBSTACLE_TEST),1)
-OBSTACLE_TEST_SUFFIX := _obstacletest
-endif
-BENCH_TESTS := $(filter 1,$(MOTOR_TEST) $(ENCODER_TEST) $(IMU_TEST) $(OBSTACLE_TEST) $(LINE_TEST))
-ifneq ($(word 2,$(BENCH_TESTS)),)
-$(error Use only one bench test: MOTOR_TEST, ENCODER_TEST, IMU_TEST, OBSTACLE_TEST or LINE_TEST)
+ifeq ($(ENCODER_TEST)$(IMU_TEST),11)
+$(error IMU_TEST=1 cannot be combined with ENCODER_TEST)
 endif
 ifeq ($(ENCODER_TEST),1)
 ENCODER_TEST_SUFFIX := _encodertest

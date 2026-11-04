@@ -108,8 +108,43 @@ IMU_TEST ?= 0
 ifneq ($(filter $(IMU_TEST),0 1),$(IMU_TEST))
 $(error Unknown IMU_TEST '$(IMU_TEST)'; use 0 or 1)
 endif
-ifeq ($(ENCODER_TEST)$(IMU_TEST),11)
-$(error IMU_TEST=1 cannot be combined with ENCODER_TEST)
+
+# LINE_TEST=1 uses real line sensors with a stand-in IMU and no ultrasonic.
+LINE_TEST ?= 0
+ifneq ($(filter $(LINE_TEST),0 1),$(LINE_TEST))
+$(error Unknown LINE_TEST '$(LINE_TEST)'; use 0 or 1)
+endif
+ifeq ($(LINE_TEST),1)
+LINE_TEST_SUFFIX := _linetest
+endif
+
+# BODY_SCAN=1 turns the robot to inspect both sides instead of using a servo.
+BODY_SCAN ?= 0
+ifneq ($(filter $(BODY_SCAN),0 1),$(BODY_SCAN))
+$(error Unknown BODY_SCAN '$(BODY_SCAN)'; use 0 or 1)
+endif
+ifeq ($(BODY_SCAN),1)
+BODY_SCAN_SUFFIX := _bodyscan
+endif
+
+# OBSTACLE_TEST=1 uses real ranging/motion with stand-in line and IMU inputs.
+OBSTACLE_TEST ?= 0
+ifneq ($(filter $(OBSTACLE_TEST),0 1),$(OBSTACLE_TEST))
+$(error Unknown OBSTACLE_TEST '$(OBSTACLE_TEST)'; use 0 or 1)
+endif
+ifeq ($(OBSTACLE_TEST),1)
+OBSTACLE_TEST_SUFFIX := _obstacletest
+endif
+
+# IMU logging may accompany the motor sequence; other bench modes are exclusive.
+BENCH_TESTS := $(filter 1,$(MOTOR_TEST) $(ENCODER_TEST) $(OBSTACLE_TEST) $(LINE_TEST))
+ifneq ($(word 2,$(BENCH_TESTS)),)
+$(error Use only one bench test: MOTOR_TEST, ENCODER_TEST, OBSTACLE_TEST or LINE_TEST)
+endif
+ifeq ($(IMU_TEST),1)
+ifneq ($(filter 1,$(ENCODER_TEST) $(OBSTACLE_TEST) $(LINE_TEST)),)
+$(error IMU_TEST=1 is only supported alone or with MOTOR_TEST=1)
+endif
 endif
 ifeq ($(ENCODER_TEST),1)
 ENCODER_TEST_SUFFIX := _encodertest

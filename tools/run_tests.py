@@ -42,6 +42,8 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     subprocess.run([sys.executable, str(ROOT / "tools/check_barr.py")], check=True)
+    subprocess.run([sys.executable, str(ROOT / "tools/test_build_profiles.py")],
+                   check=True)
     with tempfile.TemporaryDirectory(prefix="motor-test-") as temporary:
         executable = Path(temporary) / "verify"
         build(ROOT, executable)

@@ -11,14 +11,16 @@
 #define OBSTACLE_FINE_POINTS 3u
 
 /* Servo angles are in 3-degree units, with 30 facing straight ahead.
- * Coarse points are 2 units (6 degrees) apart, so they reach 12 degrees each
- * way, and the fine pass adds one more unit: never beyond 15 degrees. */
+ * Coarse points are 5 units (15 degrees) apart, so they reach 30 degrees each
+ * way. The fine pass is clamped, so the servo never goes beyond 30 degrees. */
 #define OBSTACLE_CENTRE 30u
-#define OBSTACLE_STEP 2u
-#define OBSTACLE_MAX_UNITS 5u
+#define OBSTACLE_STEP 5u
+#define OBSTACLE_MAX_UNITS 10u
 
-_Static_assert(((OBSTACLE_STEP * 2u) + 1u) <= OBSTACLE_MAX_UNITS,
-               "servo sweep would exceed 15 degrees each way");
+_Static_assert((OBSTACLE_STEP * 2u) <= OBSTACLE_MAX_UNITS,
+               "servo sweep would exceed 30 degrees each way");
+
+static uint32_t clamp_angle(uint32_t angle);
 
 static const uint8_t g_coarse_angles[OBSTACLE_COARSE_POINTS] = {
     OBSTACLE_CENTRE - (OBSTACLE_STEP * 2u), OBSTACLE_CENTRE - OBSTACLE_STEP,
@@ -87,7 +89,7 @@ void obstacle_sample(obstacle_t * p_obstacle, uint16_t range_cm, bool b_valid)
         {
             p_obstacle->state   = OBSTACLE_FINE;
             p_obstacle->best_cm = ROBOT_RANGE_MAX_CM;
-            p_obstacle->angle   = p_obstacle->best_angle - 1u;
+            p_obstacle->angle   = clamp_angle(p_obstacle->best_angle - 1u);
         }
     }
     else if (OBSTACLE_FINE == p_obstacle->state)
@@ -98,16 +100,17 @@ void obstacle_sample(obstacle_t * p_obstacle, uint16_t range_cm, bool b_valid)
 
         if (p_obstacle->fine_index < OBSTACLE_FINE_POINTS)
         {
-            p_obstacle->angle =
-                p_obstacle->best_angle + p_obstacle->fine_index - 1u;
+            p_obstacle->angle = clamp_angle(p_obstacle->best_angle +
+                                            p_obstacle->fine_index - 1u);
         }
         else
         {
+            /* The bypass checks the obstacle as it goes, so the sweep only
+             * has to choose a side: take the clearer one. */
             p_obstacle->b_left  = (p_obstacle->best_angle < 30u);
-            p_obstacle->b_ready = (p_obstacle->best_cm >= OBSTACLE_CLEAR_CM);
-            p_obstacle->state =
-                p_obstacle->b_ready ? OBSTACLE_PLAN : OBSTACLE_ABORT;
-            p_obstacle->angle = 30u;
+            p_obstacle->b_ready = true;
+            p_obstacle->state   = OBSTACLE_PLAN;
+            p_obstacle->angle   = 30u;
         }
     }
     else
@@ -159,6 +162,15 @@ uint16_t obstacle_median(uint16_t first, uint16_t second, uint16_t third)
     }
 
     return second;
+}
+
+/** @brief Keep every commanded servo angle inside the mechanical limit. */
+static uint32_t clamp_angle(uint32_t angle)
+{
+    uint32_t lowest  = OBSTACLE_CENTRE - OBSTACLE_MAX_UNITS;
+    uint32_t highest = OBSTACLE_CENTRE + OBSTACLE_MAX_UNITS;
+    angle            = (angle < lowest) ? lowest : angle;
+    return (angle > highest) ? highest : angle;
 }
 
 /*** End of file. ***/

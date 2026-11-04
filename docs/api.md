@@ -200,7 +200,7 @@ typedef struct
     uint32_t integral_right : 15;
     uint32_t prior_left : 11;
     uint32_t prior_right : 11;
-    uint32_t remainder : 11;
+    uint32_t remainder : 13;
     int16_t  pwm_left;
     int16_t  pwm_right;
 } motion_t;
@@ -245,7 +245,7 @@ Publish one whole 32-bit snapshot, never bit-field writes.
 
 `int32_t motion_edge_delta(uint32_t newer, uint32_t older, bool * pb_valid);`
 
-Return signed modulo-2^32 edge displacement, with a 64-edge guard.
+Return signed modulo-2^32 edge displacement, with an edge guard.
 
 ## app_program/subsystem2/physical_test.h
 
@@ -376,6 +376,12 @@ typedef struct
     bool     b_estop : 1;
     uint32_t barcode : 2;
     uint32_t elapsed_ms : 14;
+    uint32_t look : 3;
+    uint32_t left_cm : 9;
+    uint32_t right_cm : 9;
+    uint32_t side_mm : 12;
+    uint32_t steps : 5;
+    bool     b_margin : 1;
     uint32_t command;
 } navigation_t;
 

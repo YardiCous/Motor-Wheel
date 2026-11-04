@@ -32,7 +32,7 @@
 #define VERIFY_LINE_CALIBRATION 32u
 #define VERIFY_LOST_SAMPLES 31u
 #define VERIFY_SCAN_POINTS 8u
-#define VERIFY_BYPASS_STAGES 8u
+#define VERIFY_BYPASS_CYCLES 3000u
 #define VERIFY_CONFIRMATIONS 3u
 #define VERIFY_FIRST_SAMPLE 1u
 
@@ -45,6 +45,7 @@ static void verify_line(void);
 static void verify_bad_barcode(void);
 static void verify_obstacle(void);
 static void verify_navigation(void);
+static void verify_bypass_run(navigation_t * p_manager, bool b_clears);
 static void verify_fragments(void);
 static void verify_interlocks(void);
 static void line_sample(line_t * p_line, bool b_black, uint16_t distance);
@@ -52,7 +53,7 @@ static void motion_ticks(motion_t * p_motion, uint32_t ticks,
                          uint32_t increment, bool b_turn);
 
 /** @brief Assertions report the first reproducible violated contract. */
-int main (void)
+int main(void)
 {
     verify_fields();
     verify_vector();
@@ -73,7 +74,7 @@ int main (void)
 
 /** @brief The host decoder independently checks this firmware-format vector.
  */
-static void verify_vector (void)
+static void verify_vector(void)
 {
     uint8_t  bytes[DATA_FORMATS_TELEMETRY_BYTES] = {0u};
     uint32_t word                                = 0u;
@@ -112,7 +113,7 @@ static void verify_vector (void)
 }
 
 /** @brief Exercise cross-byte fields and preserve every neighboring bit. */
-static void verify_fields (void)
+static void verify_fields(void)
 {
     uint8_t bytes[12] = {0u};
 
@@ -169,7 +170,7 @@ static void verify_fields (void)
 
 /** @brief Distance completion, turning, wrap and stall use real controller
  * code. */
-static void verify_motion (void)
+static void verify_motion(void)
 {
     motion_t controller = {0};
     motion_init(&controller, 0u, 0u);
@@ -225,7 +226,7 @@ static void verify_motion (void)
 
 /** @brief Every combination of the twelve faults respects advisory exclusions.
  */
-static void verify_safety (void)
+static void verify_safety(void)
 {
     for (uint16_t faults = 0u; faults < VERIFY_FAULTS; ++faults)
     {
@@ -244,7 +245,7 @@ static void verify_safety (void)
 
 /** @brief Fine height integration survives 0.435-mm increments and overflow.
  */
-static void verify_terrain (void)
+static void verify_terrain(void)
 {
     terrain_t detector = {0};
     terrain_init(&detector);
@@ -294,7 +295,7 @@ static void verify_terrain (void)
 
 /** @brief All four framed barcodes decode once with encoder-measured widths.
  */
-static void verify_line (void)
+static void verify_line(void)
 {
     for (uint8_t symbol = 0u; symbol < VERIFY_BARCODE_SYMBOLS; ++symbol)
     {
@@ -350,7 +351,7 @@ static void verify_line (void)
 }
 
 /** @brief Ambiguous bars and reversing cannot generate a command. */
-static void verify_bad_barcode (void)
+static void verify_bad_barcode(void)
 {
     line_t detector = {0};
     line_init(&detector);
@@ -371,7 +372,7 @@ static void verify_bad_barcode (void)
 }
 
 /** @brief A scan cannot treat missing echoes as a traversable route. */
-static void verify_obstacle (void)
+static void verify_obstacle(void)
 {
     obstacle_t scanner = {0};
     obstacle_init(&scanner);
@@ -402,7 +403,7 @@ static void verify_obstacle (void)
 
 /** @brief Barcode, obstacle bypass, recovery and safety arbitration interact.
  */
-static void verify_navigation (void)
+static void verify_navigation(void)
 {
     navigation_t manager = {0};
     navigation_init(&manager);
@@ -415,22 +416,17 @@ static void verify_navigation (void)
     navigation_step(&manager, MOTION_IDLE, true, true, false, false, 100u,
                     true, false, false, false, false);
     assert(DATA_FORMATS_FOLLOW == manager.state);
-    navigation_step(&manager, MOTION_FOLLOW, false, true, false, false, 35u,
+    navigation_step(&manager, MOTION_FOLLOW, false, true, false, false, 25u,
                     true, false, false, false, false);
     assert(DATA_FORMATS_AVOID == manager.state);
     assert(0u != manager.b_stop_requested);
     navigation_step(&manager, MOTION_IDLE, false, false, false, false, 100u,
                     true, true, true, false, false);
     assert(1u == manager.stage);
-
-    for (uint8_t stage = VERIFY_FIRST_SAMPLE; stage < VERIFY_BYPASS_STAGES;
-         ++stage)
-    {
-        navigation_step(&manager, MOTION_IDLE, true, false, false, false, 100u,
-                        true, false, true, false, false);
-    }
-
+    verify_bypass_run(&manager, true);
     assert(DATA_FORMATS_SEARCH == manager.state);
+    assert(!manager.b_fault);
+    assert(0u == manager.side_mm);
 
     for (uint8_t confirmation = 0u; confirmation < VERIFY_CONFIRMATIONS;
          ++confirmation)
@@ -449,7 +445,7 @@ static void verify_navigation (void)
 }
 
 /** @brief A moving action cannot be replaced, and hazard combinations stop. */
-static void verify_interlocks (void)
+static void verify_interlocks(void)
 {
     motion_t controller = {0};
     motion_init(&controller, 0u, 0u);
@@ -477,17 +473,62 @@ static void verify_interlocks (void)
     assert(DATA_FORMATS_FAULT == manager.state);
     assert((manager.b_estop) && (manager.b_stop_requested));
     navigation_init(&manager);
+    assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
+    navigation_step(&manager, MOTION_FOLLOW, false, false, true, false, 100u,
+                    true, false, false, false, false);
+    assert(DATA_FORMATS_SEARCH == manager.state);
+    assert(MOTION_TURN == (manager.command & 3u));
+    assert(0u != (manager.command >> 23u));
+    uint32_t quarter = (manager.command >> 2u) & 4095u;
+    navigation_step(&manager, MOTION_IDLE, true, false, false, false, 100u,
+                    true, false, false, false, false);
+    assert(1u == manager.stage);
+    assert(0u == (manager.command >> 23u));
+    assert((quarter * 2u) == ((manager.command >> 2u) & 4095u));
+    assert(!manager.b_fault);
+    navigation_step(&manager, MOTION_IDLE, true, false, false, false, 100u,
+                    true, false, false, false, false);
+    assert(manager.b_fault);
+    navigation_init(&manager);
     manager.state      = DATA_FORMATS_SEARCH;
     manager.elapsed_ms = 2990u;
     navigation_step(&manager, MOTION_TURN, false, false, true, false, 100u,
                     true, false, false, false, false);
     assert(manager.b_fault);
+    navigation_init(&manager);
+    assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
+    navigation_step(&manager, MOTION_FOLLOW, false, true, false, false, 25u,
+                    true, false, false, false, false);
+    navigation_step(&manager, MOTION_IDLE, false, false, false, false, 100u,
+                    true, true, false, false, false);
+    verify_bypass_run(&manager, false);
+    assert(manager.b_fault);
+}
+
+/** @brief Drive the step-and-check bypass. When b_clears, the obstacle stays
+ * ahead for two sideways looks and beside for two forward looks, then clears;
+ * otherwise it never clears and the step limit must fault.
+ */
+static void verify_bypass_run(navigation_t * p_manager, bool b_clears)
+{
+    for (uint32_t cycle = 0u;
+         (cycle < VERIFY_BYPASS_CYCLES) &&
+         (DATA_FORMATS_AVOID == p_manager->state) && (!p_manager->b_fault);
+         ++cycle)
+    {
+        bool     b_side  = (p_manager->stage < 6u);
+        bool     b_there = (!b_clears) || (p_manager->steps < 2u);
+        uint16_t range   = b_side ? 100u : 200u;
+        range            = b_there ? (b_side ? 30u : 15u) : range;
+        navigation_step(p_manager, MOTION_IDLE, p_manager->b_waiting, false,
+                        false, false, range, true, false, true, false, false);
+    }
 }
 
 /** @brief Zero bytes survive the transport and oversized messages are
  * rejected.
  */
-static void verify_fragments (void)
+static void verify_fragments(void)
 {
     telemetry_t receiver = {0};
     uint8_t     payload  = 0u;
@@ -506,7 +547,7 @@ static void verify_fragments (void)
 }
 
 /** @brief Tracking sensors remain on-line while the right lane changes. */
-static void line_sample (line_t * p_line, bool b_black, uint16_t distance)
+static void line_sample(line_t * p_line, bool b_black, uint16_t distance)
 {
     uint16_t samples[ROBOT_IR_COUNT] = {3000u, 1000u, 0u};
     samples[2]                       = b_black ? 3000u : 0u;
@@ -515,7 +556,7 @@ static void line_sample (line_t * p_line, bool b_black, uint16_t distance)
 
 /** @brief Constant synthetic edge rates exercise the physical motion
  * controller. */
-static void motion_ticks (motion_t * p_motion, uint32_t ticks,
+static void motion_ticks(motion_t * p_motion, uint32_t ticks,
                          uint32_t increment, bool b_turn)
 {
     uint32_t left  = p_motion->last_left;

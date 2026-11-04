@@ -6,11 +6,36 @@
 #include "../data_formats.h"
 #include "../robot_config.h"
 #include "../subsystem2/motion.h"
-#include "obstacle.h"
 
 #include <string.h>
 
-#define NAVIGATION_BYPASS_STAGES 8u
+/* Bypass stages. S is the chosen side, F the original heading, and L the
+ * direction back toward the line (opposite of S). */
+#define BYPASS_CHOOSE 0u
+#define BYPASS_TURN_OUT 1u    /* F -> S */
+#define BYPASS_SIDE_MOVE 2u   /* step sideways, facing S */
+#define BYPASS_SIDE_FACE 3u   /* S -> F, to look ahead at the obstacle */
+#define BYPASS_SIDE_LOOK 4u   /* still ahead? */
+#define BYPASS_SIDE_RETURN 5u /* F -> S */
+#define BYPASS_FWD_MOVE 6u    /* step forward, facing F */
+#define BYPASS_FWD_FACE 7u    /* F -> L, to look across at the obstacle */
+#define BYPASS_FWD_LOOK 8u    /* still beside? */
+#define BYPASS_FWD_RETURN 9u  /* L -> F */
+#define BYPASS_BACK_MOVE 10u  /* drive back toward the line, facing L */
+#define BYPASS_BACK_TURN 11u  /* L -> F, then search for the line */
+#define NAVIGATION_SETTLE_MS 400u
+#define NAVIGATION_STEP_MM                                                    \
+    ((uint16_t)((ROBOT_TURN_MM_SECOND * ROBOT_BYPASS_STEP_MS) / 1000u))
+#define NAVIGATION_BLOCKED_CM ((ROBOT_OBSTACLE_MM / 10u) + 20u)
+#define NAVIGATION_BESIDE_EXTRA_CM 20u
+
+_Static_assert(ROBOT_BYPASS_STEP_MS <= 8000u,
+               "a bypass step must finish inside the 10 s manoeuvre limit");
+_Static_assert(((ROBOT_BYPASS_MAX_STEPS + 1u) *
+                ((ROBOT_TURN_MM_SECOND * ROBOT_BYPASS_STEP_MS) / 1000u)) +
+                       ROBOT_BYPASS_SIDE_MARGIN_MM <=
+                   4095u,
+               "the sideways total must fit the 12-bit side_mm field");
 #define NAVIGATION_QUARTER_ARC_MM ((ROBOT_TRACK_MM * 3142u) / 4000u)
 #define NAVIGATION_LOOK_ARC_MM (NAVIGATION_QUARTER_ARC_MM / 2u)
 #define NAVIGATION_LOOK_SETTLE_MS 400u
@@ -28,6 +53,13 @@ static void step_bypass(navigation_t * p_navigation, bool b_done,
                         uint16_t range_cm, bool b_range_valid);
 static void step_look(navigation_t * p_navigation, bool b_done,
                       uint16_t range_cm, bool b_range_valid);
+static void bypass_done(navigation_t * p_navigation, bool b_line_valid);
+static void bypass_act(navigation_t * p_navigation, uint16_t range_cm,
+                       bool b_range_valid);
+static void bypass_turn(navigation_t * p_navigation, bool b_out);
+static void bypass_move(navigation_t * p_navigation, uint16_t distance);
+static void bypass_look(navigation_t * p_navigation, bool b_blocked,
+                        uint32_t next_clear);
 static void step_follow(navigation_t * p_navigation, bool b_line_lost,
                         bool b_on_hump, uint16_t range_cm, bool b_range_valid,
                         bool b_barcode_zone);
@@ -183,50 +215,206 @@ static void issue(navigation_t * p_navigation, uint8_t mode, uint16_t distance,
         &p_navigation->command, mode, distance, speed, b_reverse);
 }
 
-/** @brief Three straight legs plus turns return beside the original line. */
+/** @brief Sensor-guided bypass: step, stop, look at the obstacle, repeat.
+ * No leg length is fixed; the robot keeps going until the obstacle is clear.
+ */
 static void step_bypass(navigation_t * p_navigation, bool b_done,
                         bool b_line_valid, bool b_scan_ready, bool b_scan_left,
                         uint16_t range_cm, bool b_range_valid)
 {
-    if ((0u == p_navigation->stage) && (0u != ROBOT_BODY_SCAN))
+    bool b_chosen = false;
+
+    if ((BYPASS_CHOOSE == p_navigation->stage) && (0u != ROBOT_BODY_SCAN))
     {
         step_look(p_navigation, b_done, range_cm, b_range_valid);
+        b_chosen = (BYPASS_CHOOSE != p_navigation->stage);
     }
-    else if ((0u == p_navigation->stage) && b_scan_ready)
+    else if ((BYPASS_CHOOSE == p_navigation->stage) && b_scan_ready)
     {
-        p_navigation->b_left     = b_scan_left;
-        p_navigation->stage      = 1u;
+        p_navigation->b_left = b_scan_left;
+        p_navigation->stage  = BYPASS_TURN_OUT;
+        b_chosen             = true;
+    }
+    else if ((p_navigation->b_waiting) && b_done)
+    {
         p_navigation->b_waiting  = false;
         p_navigation->elapsed_ms = 0u;
+        bypass_done(p_navigation, b_line_valid);
+    }
+    else
+    {
+        /* Waiting for the scan, a command to finish, or a look to settle. */
     }
 
-    if ((p_navigation->b_waiting) && b_done)
+    if (b_chosen)
     {
-        ++p_navigation->stage;
         p_navigation->b_waiting  = false;
         p_navigation->elapsed_ms = 0u;
+        p_navigation->side_mm    = 0u;
+        p_navigation->steps      = 0u;
+        p_navigation->b_margin   = false;
     }
 
-    uint32_t stage = p_navigation->stage;
+    bool b_running = (DATA_FORMATS_AVOID == p_navigation->state) &&
+                     (BYPASS_CHOOSE != p_navigation->stage) &&
+                     (!p_navigation->b_waiting);
 
-    if ((stage > 0u) && (stage < NAVIGATION_BYPASS_STAGES) &&
-        (!p_navigation->b_waiting))
+    if (b_running)
     {
-        bool b_turn = (0u != (stage & 1u));
-        bool b_left = p_navigation->b_left;
-        b_left      = ((3u == stage) || (5u == stage)) ? !b_left : b_left;
-        uint16_t distance =
-            (4u == stage) ? ROBOT_BYPASS_FORWARD_MM : ROBOT_BYPASS_SIDE_MM;
-        distance     = b_turn ? NAVIGATION_QUARTER_ARC_MM : distance;
-        uint8_t mode = b_turn ? MOTION_TURN : MOTION_MOVE;
-        issue(p_navigation, mode, distance, ROBOT_TURN_MM_SECOND,
-              b_turn && b_left);
-        p_navigation->b_waiting = true;
+        bypass_act(p_navigation, range_cm, b_range_valid);
     }
+}
 
-    if (stage >= NAVIGATION_BYPASS_STAGES)
+/** @brief Choose the next stage once the current turn or move has finished.
+ */
+static void bypass_done(navigation_t * p_navigation, bool b_line_valid)
+{
+    switch (p_navigation->stage)
     {
-        start_search(p_navigation, b_line_valid);
+        case BYPASS_TURN_OUT:
+        case BYPASS_SIDE_RETURN:
+            p_navigation->stage = BYPASS_SIDE_MOVE;
+            break;
+
+        case BYPASS_SIDE_MOVE:
+            p_navigation->stage = BYPASS_SIDE_FACE;
+            break;
+
+        case BYPASS_SIDE_FACE:
+            p_navigation->stage = BYPASS_SIDE_LOOK;
+            break;
+
+        case BYPASS_FWD_MOVE:
+            p_navigation->stage = BYPASS_FWD_FACE;
+            break;
+
+        case BYPASS_FWD_FACE:
+            p_navigation->stage = BYPASS_FWD_LOOK;
+            break;
+
+        case BYPASS_FWD_RETURN:
+            p_navigation->stage = BYPASS_FWD_MOVE;
+            break;
+
+        case BYPASS_BACK_MOVE:
+            p_navigation->stage = (0u == p_navigation->side_mm)
+                                      ? BYPASS_BACK_TURN
+                                      : BYPASS_BACK_MOVE;
+            break;
+
+        default:
+            /* BACK_TURN finished: facing F beside the line, so search. */
+            start_search(p_navigation, b_line_valid);
+            break;
+    }
+}
+
+/** @brief Issue the current stage's turn or move, or evaluate a look. */
+static void bypass_act(navigation_t * p_navigation, uint16_t range_cm,
+                       bool b_range_valid)
+{
+    uint16_t step = NAVIGATION_STEP_MM;
+    /* An invalid reading is treated as the obstacle still being there. */
+    uint16_t seen   = b_range_valid ? range_cm : 0u;
+    uint32_t beside = p_navigation->side_mm / 10u;
+    beside += NAVIGATION_BESIDE_EXTRA_CM;
+    bool b_still = (p_navigation->elapsed_ms >= NAVIGATION_SETTLE_MS);
+
+    switch (p_navigation->stage)
+    {
+        case BYPASS_SIDE_FACE:
+        case BYPASS_FWD_FACE:
+            bypass_turn(p_navigation, false);
+            break;
+
+        case BYPASS_SIDE_MOVE:
+            step = p_navigation->b_margin ? ROBOT_BYPASS_SIDE_MARGIN_MM : step;
+            p_navigation->side_mm = p_navigation->side_mm + step;
+            bypass_move(p_navigation, step);
+            break;
+
+        case BYPASS_FWD_MOVE:
+            step = p_navigation->b_margin ? ROBOT_BYPASS_FWD_MARGIN_MM : step;
+            bypass_move(p_navigation, step);
+            break;
+
+        case BYPASS_BACK_MOVE:
+            step                  = (p_navigation->side_mm < step)
+                                        ? (uint16_t)p_navigation->side_mm
+                                        : step;
+            p_navigation->side_mm = p_navigation->side_mm - step;
+            bypass_move(p_navigation, step);
+            break;
+
+        case BYPASS_SIDE_LOOK:
+            if (b_still)
+            {
+                bypass_look(p_navigation, seen < NAVIGATION_BLOCKED_CM,
+                            BYPASS_FWD_MOVE);
+                p_navigation->stage = (BYPASS_FWD_MOVE == p_navigation->stage)
+                                          ? BYPASS_FWD_MOVE
+                                          : BYPASS_SIDE_RETURN;
+            }
+            break;
+
+        case BYPASS_FWD_LOOK:
+            if (b_still)
+            {
+                bypass_look(p_navigation, seen < beside, BYPASS_BACK_MOVE);
+                p_navigation->stage = (BYPASS_BACK_MOVE == p_navigation->stage)
+                                          ? BYPASS_BACK_MOVE
+                                          : BYPASS_FWD_RETURN;
+            }
+            break;
+
+        default:
+            /* TURN_OUT, SIDE_RETURN, FWD_RETURN and BACK_TURN turn toward S.
+             */
+            bypass_turn(p_navigation, true);
+            break;
+    }
+}
+
+/** @brief Quarter turn toward S (out) or away from S (back). A left side
+ * means "out" is a left turn, which the motion API encodes as reverse.
+ */
+static void bypass_turn(navigation_t * p_navigation, bool b_out)
+{
+    bool b_left = b_out ? p_navigation->b_left : !p_navigation->b_left;
+    issue(p_navigation, MOTION_TURN, NAVIGATION_QUARTER_ARC_MM,
+          ROBOT_TURN_MM_SECOND, b_left);
+    p_navigation->b_waiting = true;
+}
+
+/** @brief Straight move forward along the robot's current heading. */
+static void bypass_move(navigation_t * p_navigation, uint16_t distance)
+{
+    issue(p_navigation, MOTION_MOVE, distance, ROBOT_TURN_MM_SECOND, false);
+    p_navigation->b_waiting = true;
+}
+
+/** @brief After a margin move, go on to next_clear. Otherwise the obstacle is
+ * either still there (count a step, fault past the limit) or just cleared
+ * (do one margin move before moving on).
+ */
+static void bypass_look(navigation_t * p_navigation, bool b_blocked,
+                        uint32_t next_clear)
+{
+    if (p_navigation->b_margin)
+    {
+        p_navigation->b_margin = false;
+        p_navigation->steps    = 0u;
+        p_navigation->stage    = next_clear;
+    }
+    else if (b_blocked)
+    {
+        ++p_navigation->steps;
+        p_navigation->b_fault = (p_navigation->b_fault) ||
+                                (p_navigation->steps > ROBOT_BYPASS_MAX_STEPS);
+    }
+    else
+    {
+        p_navigation->b_margin = true;
     }
 }
 
@@ -388,24 +576,14 @@ static void step_look(navigation_t * p_navigation, bool b_done,
 
         default:
         {
-            bool b_left = (p_navigation->left_cm >= p_navigation->right_cm);
-            uint32_t best =
-                b_left ? p_navigation->left_cm : p_navigation->right_cm;
-
-            if (best >= OBSTACLE_CLEAR_CM)
-            {
-                p_navigation->b_left     = b_left;
-                p_navigation->stage      = 1u;
-                p_navigation->b_waiting  = false;
-                p_navigation->elapsed_ms = 0u;
-            }
-            else
-            {
-                /* Neither side is clear enough for the bypass legs. */
-                p_navigation->b_fault = true;
-            }
-
-            look = 0u;
+            /* The bypass checks the obstacle as it goes, so this only has
+             * to choose a side: take the clearer one. */
+            p_navigation->b_left =
+                (p_navigation->left_cm >= p_navigation->right_cm);
+            p_navigation->stage      = 1u;
+            p_navigation->b_waiting  = false;
+            p_navigation->elapsed_ms = 0u;
+            look                     = 0u;
         }
         break;
     }

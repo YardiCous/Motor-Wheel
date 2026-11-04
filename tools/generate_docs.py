@@ -3,14 +3,16 @@ from pathlib import Path
 import re
 
 from format_c import ROOT, sources
-from robot_protocol import FIELDS, PACKET_BYTES
+from dashboard.robot_protocol import FIELDS, PACKET_BYTES
 
 MAXIMUMS = {
     "motion_t": {"mode": 6, "speed": 500, "progress_um": 4095999,
                  "position_um": 4095999, "elapsed_ms": 10000,
                  "stall_left_ms": 200, "stall_right_ms": 200,
                  "integral_left": 32000, "integral_right": 32000,
-                 "prior_left": 2000, "prior_right": 2000, "remainder": 1918},
+                 "prior_left": 2000, "prior_right": 2000,
+                 # 2 * (2400 encoder edges per turn - 1)
+                 "remainder": 4798},
     "line_t": {"state": 5, "error": 254, "segment": 6, "lost_ms": 150,
                "frame_ms": 1000, "calibration_samples": 32, "junction_ms": 300},
     "terrain_t": {"state": 6, "failures": 3, "cal_samples": 32,
@@ -138,7 +140,7 @@ def main():
              "  mg x256. IMU failures saturate at three; retries and all",
              "  state timers saturate or transition before their bit-field limit.",
              "* Distance state uses 0..4095999 micrometres (22 bits). The division",
-             "  remainder -959..959 is stored with bias 959 (11 bits).",
+             "  remainder -2399..2399 is stored with bias 2399 (13 bits).",
              "* Queue overflow never blocks control. Essential command/event overflow",
              "  sets a fatal bit; routine telemetry replaces the oldest entry.",
              "  ACK overflow drops the ACK only. Fatal causes remain in Safety's mask.",
@@ -152,3 +154,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

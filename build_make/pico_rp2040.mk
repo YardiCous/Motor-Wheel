@@ -67,8 +67,8 @@ endif
 
 # Optional MQTT client on top of NET=lwip. Connects and publishes from the
 # same processor-1-owned task as everything else above -- see
-# lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.c. Broker address and topic
-# come from config/wifi_secrets.h (gitignored; copy from
+# app_program/subsystem1/mqtt_utk.c. Topics are in subsystem1/telemetry.h;
+# broker settings come from config/wifi_secrets.h (gitignored; copy from
 # config/wifi_secrets.example.h), same as the WiFi credentials.
 MQTT ?= 0
 ifneq ($(filter $(MQTT),0 1),$(MQTT))
@@ -149,7 +149,7 @@ endif
 # a live hazard: an SMP=1 build was once flashed in place of an SMP=0 one and
 # only the banner in the log revealed it.
 #
-EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)$(MOTOR_TEST_SUFFIX)$(ENCODER_TEST_SUFFIX)$(IMU_TEST_SUFFIX)
+EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)$(MOTOR_TEST_SUFFIX)$(ENCODER_TEST_SUFFIX)$(IMU_TEST_SUFFIX)$(OBSTACLE_TEST_SUFFIX)$(LINE_TEST_SUFFIX)$(BODY_SCAN_SUFFIX)
 
 GCC := arm-none-eabi-gcc
 AS := arm-none-eabi-gcc
@@ -209,7 +209,7 @@ ifeq ($(SMP),1)
 CFLAGS  += -DCNF_SMP=1
 ASFLAGS += -DCNF_SMP=1
 endif
-CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST) -DIMU_TEST=$(IMU_TEST)
+CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST) -DIMU_TEST=$(IMU_TEST) -DOBSTACLE_TEST=$(OBSTACLE_TEST) -DLINE_TEST=$(LINE_TEST) -DROBOT_BODY_SCAN=$(BODY_SCAN)u
 CFLAGS  += -DTM_CONSOLE_UART=$(CRASH_REPORT)
 ifeq ($(CRASH_REPORT),0)
 CFLAGS  += -DBOARD_UART0_FREE=1
@@ -242,9 +242,7 @@ endif
 # before any recipe executes.
 ################################################################################
 
-# Every -D switch must appear here. MOTOR_TEST and ENCODER_TEST were
-# missing, so a motor-test object could be relinked into a normal image.
-PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)-motor$(MOTOR_TEST)-encoder$(ENCODER_TEST)-imu$(IMU_TEST)
+PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)-motor$(MOTOR_TEST)-enc$(ENCODER_TEST)-imu$(IMU_TEST)-obst$(OBSTACLE_TEST)-line$(LINE_TEST)-body$(BODY_SCAN)
 PROFILE_FILE := .build_profile
 
 ifneq ($(strip $(shell cat $(PROFILE_FILE) 2>/dev/null)),$(PROFILE_ID))
@@ -478,13 +476,11 @@ mtkernel_3/cyw43/cyw43_lwip.o: $(CYW43_DRIVER_PATH)/src/cyw43_lwip.c
 ifeq ($(MQTT),1)
 
 MQTT_CORE_OBJS := ./mtkernel_3/lwip/apps/mqtt/mqtt.o
-MQTT_PORT_OBJS := ./mtkernel_3/lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.o
-$(MQTT_PORT_OBJS): CFLAGS += -std=c99 -Wall -Wextra -Werror -Wshadow -Wmissing-prototypes
 
 CFLAGS += -DTM_MQTT=1
 
-OBJS += $(MQTT_CORE_OBJS) $(MQTT_PORT_OBJS)
-C_DEPS += $(MQTT_CORE_OBJS:.o=.d) $(MQTT_PORT_OBJS:.o=.d)
+OBJS += $(MQTT_CORE_OBJS)
+C_DEPS += $(MQTT_CORE_OBJS:.o=.d)
 
 mtkernel_3/lwip/apps/mqtt/mqtt.o: $(LWIPDIR)/apps/mqtt/mqtt.c
 	@echo 'Building lwIP file: $<'
@@ -505,3 +501,4 @@ include mtkernel_3/lib/libbsp/sysdepend/cpu/rp2040/subdir.mk
 include mtkernel_3/kernel/sysdepend/pico_rp2040/subdir.mk
 include mtkernel_3/kernel/sysdepend/cpu/rp2040/subdir.mk
 include mtkernel_3/kernel/sysdepend/cpu/core/armv6m/subdir.mk
+

@@ -10,6 +10,7 @@
 #include "terrain_test.h"
 
 #include "../../app_program/data_formats.h"
+#include "../../app_program/robot_config.h"
 #include "../../app_program/subsystem4/terrain.h"
 #include "../../app_program/subsystem4/terrain_config.h"
 

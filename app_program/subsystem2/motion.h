@@ -21,6 +21,8 @@ typedef struct
     uint32_t last_left;
     uint32_t last_right;
     uint32_t position_um : 22;
+    uint32_t total_um : 22;
+    uint32_t total_remainder : 12;
     uint32_t mode : 3;
     bool     b_reverse : 1;
     bool     b_done : 1;
@@ -37,7 +39,7 @@ typedef struct
     uint32_t integral_right : 15;
     uint32_t prior_left : 11;
     uint32_t prior_right : 11;
-    uint32_t remainder : 11;
+    uint32_t remainder : 13;
     int16_t  pwm_left;
     int16_t  pwm_right;
 } motion_t;
@@ -66,7 +68,7 @@ void motion_step(motion_t * p_motion, uint32_t left, uint32_t right,
 /** @brief Publish one whole 32-bit snapshot, never bit-field writes. */
 uint32_t motion_snapshot(const motion_t * p_motion, uint8_t tick,
                          uint16_t speed, bool b_reverse);
-/** @brief Return signed modulo-2^32 edge displacement, with a 64-edge guard.
+/** @brief Return signed modulo-2^32 edge displacement, with an edge guard.
  */
 int32_t motion_edge_delta(uint32_t newer, uint32_t older, bool * pb_valid);
 

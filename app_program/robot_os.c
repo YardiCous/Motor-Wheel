@@ -47,6 +47,10 @@
 #define ROBOT_SOURCE_NAV 3u
 #define ROBOT_SOURCE_TIMING 4u
 #define ROBOT_SOURCE_NETWORK 5u
+/* Encoder scale from robot_config.h, as signed values for speed arithmetic. */
+#define ROBOT_OS_EDGES ((int32_t)ROBOT_ENCODER_EDGES_TURN)
+#define ROBOT_OS_SPEED_SCALE ((int32_t)(ROBOT_WHEEL_CIRCUM_UM / 10u))
+#define ROBOT_OS_MEAN_SCALE ((int32_t)(ROBOT_WHEEL_CIRCUM_UM / 20u))
 
 /** @brief Every member is a shared control flag or bounded timestamp. */
 typedef struct
@@ -69,6 +73,7 @@ typedef struct
     bool     b_network_online : 1;
     bool     b_line_visible : 1;
     bool     b_line_lost : 1;
+    uint32_t total_distance_mm : 12;
     uint32_t reset_at_ms;
 } shared_t;
 
@@ -134,6 +139,7 @@ static void     obstacle_task(INT start, void * p_argument);
 static void     telemetry_task(INT start, void * p_argument);
 #if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!IMU_TEST))
 static void motion_cycle(motion_t * p_motion);
+static bool wheel_speeds(int32_t edges_left, int32_t edges_right);
 #endif /* MOTOR_TEST && ENCODER_TEST */
 #if !OBSTACLE_TEST
 static void line_cycle(line_t * p_line);
@@ -158,8 +164,10 @@ static void remote_commands(navigation_t * p_navigation);
 static void dispatch_navigation(navigation_t * p_navigation);
 #endif /* MOTOR_TEST && ENCODER_TEST */
 #if !LINE_TEST
-static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle);
-static bool range_sample(uint16_t * p_range);
+static void     obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle);
+static bool     range_sample(uint16_t * p_range);
+static uint16_t ping_range(const uint16_t * p_ranges, uint8_t echoes);
+static uint8_t  read_pings(uint16_t * p_ranges);
 #endif /* LINE_TEST */
 static uint16_t current_faults(void);
 
@@ -671,6 +679,9 @@ static void telemetry_task(INT start, void * p_argument)
             packet[index] = g_packet[index];
         }
 
+        /* Control consumers retain signed odometry in g_packet. */
+        (void)data_formats_write(packet, 5u, 12u,
+                                 g_shared.total_distance_mm);
         board_io_unlock(mask);
         (void)data_formats_write(packet, 224u, 32u, board_io_time_ms());
         ER result = tk_snd_mbf(gh_telemetry_queue, packet, 32, TMO_POL);
@@ -737,11 +748,12 @@ static void motion_cycle(motion_t * p_motion)
         motion_edge_delta(left, p_motion->last_left, &b_valid_delta);
     int32_t edges_right =
         motion_edge_delta(right, p_motion->last_right, &b_valid_delta);
-    int32_t signed_speed = ((edges_left + edges_right) * 10210) / 960;
-    signed_speed         = (signed_speed < -511) ? -511 : signed_speed;
-    signed_speed         = (signed_speed > 511) ? 511 : signed_speed;
-    int16_t left_pwm     = 0;
-    int16_t right_pwm    = 0;
+    int32_t signed_speed =
+        ((edges_left + edges_right) * ROBOT_OS_MEAN_SCALE) / ROBOT_OS_EDGES;
+    signed_speed      = (signed_speed < -511) ? -511 : signed_speed;
+    signed_speed      = (signed_speed > 511) ? 511 : signed_speed;
+    int16_t left_pwm  = 0;
+    int16_t right_pwm = 0;
     /* Steering is offset binary in eight bits, with bias 127. */
     int16_t steering = (int16_t)((int32_t)field_read(121u, 8u) - 127);
     motion_step(p_motion, left, right, steering,
@@ -761,20 +773,12 @@ static void motion_cycle(motion_t * p_motion)
                 motion_snapshot(p_motion, tick, speed, signed_speed < 0));
     field_write(139u, 32u, left);
     field_write(171u, 32u, right);
-    int32_t speed_left  = (edges_left * 20420) / 960;
-    int32_t speed_right = (edges_right * 20420) / 960;
-    bool    b_range     = (speed_left < -512) || (speed_left > 511) ||
-                          (speed_right < -512) || (speed_right > 511);
+    bool b_range = wheel_speeds(edges_left, edges_right);
     faults |= b_range ? DATA_FORMATS_FAULT_RANGE : 0u;
     fault_source(ROBOT_SOURCE_MOTION, faults);
-    speed_left  = (speed_left < -512) ? -512 : speed_left;
-    speed_left  = (speed_left > 511) ? 511 : speed_left;
-    speed_right = (speed_right < -512) ? -512 : speed_right;
-    speed_right = (speed_right > 511) ? 511 : speed_right;
-    field_write(203u, 10u, data_formats_signed(speed_left, 10u));
-    field_write(213u, 10u, data_formats_signed(speed_right, 10u));
     mask                   = board_io_lock();
     g_shared.b_motion_done = (g_shared.b_motion_done) || (p_motion->b_done);
+    g_shared.total_distance_mm = p_motion->total_um / 1000u;
     board_io_unlock(mask);
     p_motion->b_done = false;
     heartbeat(0u);
@@ -783,6 +787,25 @@ static void motion_cycle(motion_t * p_motion)
     {
         (void)tk_wup_tsk(gh_tasks[0]);
     }
+}
+
+/** @brief Publish both wheel speeds in mm/s. A speed outside the signed
+ * 10-bit telemetry field is reported as a range fault and clamped.
+ */
+static bool wheel_speeds(int32_t edges_left, int32_t edges_right)
+{
+    int32_t speed_left = (edges_left * ROBOT_OS_SPEED_SCALE) / ROBOT_OS_EDGES;
+    int32_t speed_right =
+        (edges_right * ROBOT_OS_SPEED_SCALE) / ROBOT_OS_EDGES;
+    bool b_range = (speed_left < -512) || (speed_left > 511) ||
+                   (speed_right < -512) || (speed_right > 511);
+    speed_left   = (speed_left < -512) ? -512 : speed_left;
+    speed_left   = (speed_left > 511) ? 511 : speed_left;
+    speed_right  = (speed_right < -512) ? -512 : speed_right;
+    speed_right  = (speed_right > 511) ? 511 : speed_right;
+    field_write(203u, 10u, data_formats_signed(speed_left, 10u));
+    field_write(213u, 10u, data_formats_signed(speed_right, 10u));
+    return b_range;
 }
 
 #endif /* MOTOR_TEST && ENCODER_TEST */
@@ -1218,6 +1241,9 @@ static void bench_init(bench_t * p_bench)
     tm_printf((UB *)"OBSTACLE TEST: E-stop is GP21, RESET is GP22\n");
     tm_printf((UB *)"OBSTACLE TEST: scan 0 idle 1 coarse 2 fine 3 plan\n");
     tm_printf((UB *)"OBSTACLE TEST: scan 4 bypass 5 recover 6 abort\n");
+    tm_printf((UB *)"BYPASS: 1 turn out, 2 side step, 3 face ahead, 4 look\n");
+    tm_printf((UB *)"BYPASS: 5 turn out, 6 fwd step, 7 face line, 8 look\n");
+    tm_printf((UB *)"BYPASS: 9 turn out, 10 back to line, 11 turn out\n");
     tm_printf((UB *)"FAULT BITS: 001 stall 002 encoder 004 imu 008 noecho\n");
     tm_printf((UB *)"FAULT BITS: 020 impact 040 estop/close 080 watchdog\n");
     tm_printf((UB *)"FAULT BITS: 100 range 200 timeout 400 queue\n");
@@ -1334,41 +1360,30 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
 
     uint32_t measured_angle = p_obstacle->angle;
     uint16_t ranges[3]      = {0u};
-    bool     b_valid        = true;
     uint32_t start          = board_io_time_ms();
+    uint8_t  echoes         = read_pings(ranges);
 
-    for (uint8_t sample = 0u; sample < ROBOT_RANGE_SAMPLES; ++sample)
-    {
-        b_valid = (range_sample(&ranges[sample])) && b_valid;
-
-        if (sample < (ROBOT_RANGE_SAMPLES - 1u))
-        {
-            heartbeat(4u);
-        }
-    }
-
-    uint16_t range = obstacle_median(ranges[0], ranges[1], ranges[2]);
-    obstacle_sample(p_obstacle, range, b_valid);
+    /* No echo at all means nothing within range, so it reads as clear. */
+    uint16_t range = ping_range(ranges, echoes);
+    obstacle_sample(p_obstacle, range, true);
 #if OBSTACLE_TEST
-    tm_printf((UB *)"RANGE: %u cm valid=%d angle=%u raw=%u,%u,%u\n",
-              (unsigned)range, b_valid ? 1 : 0, (unsigned)measured_angle,
+    tm_printf((UB *)"RANGE: %u cm echoes=%u angle=%u raw=%u,%u,%u\n",
+              (unsigned)range, (unsigned)echoes, (unsigned)measured_angle,
               (unsigned)ranges[0], (unsigned)ranges[1], (unsigned)ranges[2]);
 #endif /* OBSTACLE_TEST */
     /* One scan cycle is bounded below 500 ms and fits uint16_t. */
     obstacle_tick(p_obstacle, (uint16_t)(board_io_time_ms() - start + 100u));
     uint32_t state     = p_obstacle->state;
     bool     b_forward = (30u == measured_angle);
-    field_write(103u, 9u, (b_valid && b_forward) ? range : 0u);
+    field_write(103u, 9u, b_forward ? range : 0u);
     field_write(112u, 6u,
                 (OBSTACLE_PLAN == state) ? p_obstacle->best_angle
                                          : p_obstacle->angle);
     field_write(132u, 3u, state);
-    bool b_close =
-        b_forward && b_valid && ((range * 10u) < ROBOT_CLEARANCE_MM);
+    bool     b_close = b_forward && ((range * 10u) < ROBOT_CLEARANCE_MM);
     bool     b_abort = (OBSTACLE_ABORT == state);
     uint16_t faults  = b_close ? DATA_FORMATS_FAULT_ESTOP : 0u;
     faults |= b_abort ? DATA_FORMATS_FAULT_TIMEOUT : 0u;
-    faults |= !b_valid ? DATA_FORMATS_FAULT_NO_ECHO : 0u;
     fault_source(ROBOT_SOURCE_SCAN, faults);
     heartbeat(4u);
 }
@@ -1391,6 +1406,59 @@ static bool range_sample(uint16_t * p_range)
     }
 
     return (E_OK == result) && b_valid;
+}
+
+/** @brief Ping three times; only pings with an echo are kept, packed first.
+ * Returns how many of the three came back.
+ */
+static uint8_t read_pings(uint16_t * p_ranges)
+{
+    uint8_t echoes = 0u;
+
+    for (uint8_t sample = 0u; sample < ROBOT_RANGE_SAMPLES; ++sample)
+    {
+        uint16_t sample_cm = 0u;
+
+        if (range_sample(&sample_cm))
+        {
+            p_ranges[echoes] = sample_cm;
+            ++echoes;
+        }
+
+        if (sample < (ROBOT_RANGE_SAMPLES - 1u))
+        {
+            heartbeat(4u);
+        }
+    }
+
+    return echoes;
+}
+
+/** @brief Median of three echoes, the nearer of two, or the only one.
+ * With no echo at all, nothing is within range, so it reports the maximum.
+ */
+static uint16_t ping_range(const uint16_t * p_ranges, uint8_t echoes)
+{
+    uint16_t range = ROBOT_RANGE_MAX_CM;
+
+    if (3u == echoes)
+    {
+        range = obstacle_median(p_ranges[0], p_ranges[1], p_ranges[2]);
+    }
+    else if (2u == echoes)
+    {
+        range = (p_ranges[0] < p_ranges[1]) ? p_ranges[0] : p_ranges[1];
+    }
+    else if (1u == echoes)
+    {
+        range = p_ranges[0];
+    }
+    else
+    {
+        /* No echo: nothing within the sensor's range. */
+    }
+
+    return range;
 }
 #endif /* LINE_TEST */
 

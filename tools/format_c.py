@@ -11,8 +11,6 @@ ROOT = Path(__file__).resolve().parents[1]
 def sources():
     return sorted(ROOT.joinpath("app_program").rglob("*.[ch]")) + sorted(
         ROOT.joinpath("testing/host").glob("*.[ch]")) + [
-            ROOT / "lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.c",
-            ROOT / "lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.h",
             ROOT / "config/config_device.h"]
 
 

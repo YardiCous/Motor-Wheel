@@ -11,7 +11,7 @@ from a successful build or host simulation.
 |---|---|---|
 | Application ISO C99 and strict compiler diagnostics | Pass | `python3 tools/run_tests.py` |
 | Packed bit boundaries, neighbor preservation, overflow rejection | Pass | `testing/host/verify_main.c`, `testing/evidence/host_tests.txt` |
-| C full telemetry vector decoded independently in Python | Pass | Same test runner and `tools/robot_protocol.py` |
+| C full telemetry vector decoded independently in Python | Pass | Same test runner and `tools/dashboard/robot_protocol.py` |
 | All 4096 combinations of twelve fault bits | Pass | Exhaustive safety test; WiFi/MQTT advisory exclusions |
 | Direction/wrap guard, 1-m synthetic move, turn, stall, E-stop, pre-emption | Pass | Motion and interlock tests |
 | Sub-mm hump increments, peak retention, overflow invalidation, impact, failed readings | Pass | Terrain tests |

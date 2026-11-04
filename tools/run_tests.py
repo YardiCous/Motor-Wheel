@@ -12,7 +12,8 @@ CORE = ["data_formats.c", "subsystem1/telemetry.c", "subsystem2/motion.c",
         "subsystem5/navigation.c", "subsystem5/obstacle.c"]
 FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Werror", "-Wshadow",
          "-Wstrict-prototypes", "-Wmissing-prototypes", "-Wsign-conversion",
-         "-pedantic"]
+         "-pedantic", "-DROBOT_ENCODER_EDGES_TURN=960u",
+         "-DROBOT_TRACK_MM=140u"]
 
 
 def build(root, executable, sanitize=True):
@@ -46,7 +47,7 @@ def main():
         build(ROOT, executable)
         output = run(executable)
         print(output, end="")
-        from robot_protocol import decode, encode_command
+        from dashboard.robot_protocol import decode, encode_command
         vector = next(line.split()[1] for line in output.splitlines()
                       if line.startswith("VECTOR "))
         decoded = decode(bytes.fromhex(vector))
@@ -76,3 +77,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

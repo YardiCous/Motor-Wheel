@@ -51,13 +51,17 @@ Only the Motion task calls this after startup.
 
 Sample all three 12-bit ADC channels with a bounded timeout.
 
-`bool board_io_imu_init(void);`
+`void board_io_i2c_init(void);`
 
-Initialize the 100-Hz, +/-4-g LSM303DLHC accelerometer.
+Reset I2C1 to 400-kHz master mode; no bus traffic.
 
-`bool board_io_imu(int16_t * p_x, int16_t * p_y, int16_t * p_z);`
+`bool board_io_i2c_read(uint8_t address, uint8_t reg, uint8_t * p_bytes, uint8_t length);`
 
-Read a coherent XYZ sample in milli-g through I2C1.
+Read 1..8 consecutive registers from a 7-bit I2C1 target. The caller sets the chip's auto-increment bit in reg when it needs one.
+
+`bool board_io_i2c_write(uint8_t address, uint8_t reg, uint8_t value);`
+
+Write one register on a 7-bit I2C1 target.
 
 `void board_io_servo(uint8_t angle);`
 
@@ -145,6 +149,12 @@ Consume one binary acknowledgement for robot/ack.
 
 Check format boundaries and safety latching before task startup.
 
+## app_program/subsystem1/mqtt_utk.h
+
+`void mqtt_utk_start(void);`
+
+Poll connection readiness from the existing WiFi service task.
+
 ## app_program/subsystem1/telemetry.h
 
 `void telemetry_begin(telemetry_t * p_receiver, uint32_t total, bool b_command_topic);`
@@ -184,6 +194,8 @@ typedef struct
     uint32_t last_left;
     uint32_t last_right;
     uint32_t position_um : 22;
+    uint32_t total_um : 22;
+    uint32_t total_remainder : 12;
     uint32_t mode : 3;
     bool     b_reverse : 1;
     bool     b_done : 1;
@@ -200,7 +212,7 @@ typedef struct
     uint32_t integral_right : 15;
     uint32_t prior_left : 11;
     uint32_t prior_right : 11;
-    uint32_t remainder : 11;
+    uint32_t remainder : 13;
     int16_t  pwm_left;
     int16_t  pwm_right;
 } motion_t;
@@ -245,7 +257,7 @@ Publish one whole 32-bit snapshot, never bit-field writes.
 
 `int32_t motion_edge_delta(uint32_t newer, uint32_t older, bool * pb_valid);`
 
-Return signed modulo-2^32 edge displacement, with a 64-edge guard.
+Return signed modulo-2^32 edge displacement, with an edge guard.
 
 ## app_program/subsystem2/physical_test.h
 
@@ -298,6 +310,66 @@ Process 12-bit ADC samples and modulo-4096 encoder distance.
 
 Return steering -127..127, with validity stored separately.
 
+## app_program/subsystem4/drv_lsm303.h
+
+`bool drv_lsm303_init(drv_lsm303_t * p_imu);`
+
+Which chip was found, and where. */
+typedef struct
+{
+    uint32_t variant : 2;       /* DRV_LSM303_NONE, DLHC or D */
+    uint32_t accel_address : 7; /* 7-bit I2C address */
+    uint32_t mag_address : 7;
+    /* Identity registers as read, for the boot print. Raw chip bytes. */
+    uint8_t id[DRV_LSM303_ID_BYTES];
+} drv_lsm303_t;
+
+/** @brief Reset I2C1, identify the chip and write its configuration. Each configuration register is read back to prove the write landed. @return false if no supported chip answers or a write did not stick.
+
+`bool drv_lsm303_accel(const drv_lsm303_t * p_imu, int16_t * p_raw, int16_t * p_mg);`
+
+Read one acceleration sample: raw chip counts and milli-g. Both arrays hold chip X, Y, Z. Either pointer may be NULL.
+
+`bool drv_lsm303_mag(const drv_lsm303_t * p_imu, int16_t * p_raw);`
+
+Read raw magnetometer counts in chip X, Y, Z order.
+
+`const char * drv_lsm303_name(const drv_lsm303_t * p_imu);`
+
+Printable chip name for the boot banner.
+
+## app_program/subsystem4/imu_test.h
+
+`void imu_test_init(imu_test_t * p_test);`
+
+Bring-up state; the encoders give distance when pushed by hand. */
+typedef struct
+{
+    drv_lsm303_t imu;
+    terrain_t    terrain;
+    uint32_t     last_left; /* encoder counts, modulo 2^32 */
+    uint32_t     last_right;
+    int64_t      edges;    /* left + right edges since start */
+    uint32_t     start_ms; /* kernel time at init */
+    uint32_t     last_row_ms;
+    uint32_t     last_retry_ms;
+    uint32_t     last_timing_ms;
+    uint32_t     last_status_ms;
+    uint32_t     read_us : 16;     /* this cycle's I2C read time */
+    uint32_t     step_us : 16;     /* this cycle's terrain_step time */
+    uint32_t     max_read_us : 16; /* worst case since the last summary */
+    uint32_t     max_step_us : 16;
+    uint32_t     last_state : 3; /* terrain state last cycle, for events */
+    bool         b_found : 1;    /* a supported chip answered */
+    bool         b_reported : 1; /* chip found/lost already printed */
+} imu_test_t;
+
+/** @brief Stop the motors, scan I2C1, identify the chip, print the header.
+
+`void imu_test_step(imu_test_t * p_test);`
+
+One 10-ms cycle: sample, run terrain, print at 20 Hz.
+
 ## app_program/subsystem4/safety.h
 
 `void safety_init(safety_t * p_safety);`
@@ -324,36 +396,97 @@ RESET succeeds only when every currently active fatal cause clears.
 
 `void terrain_init(terrain_t * p_terrain);`
 
-Fine accumulation retains small 100-Hz height increments. */
+One 10-ms sample, gathered by the caller from IMU and Motion. */
 typedef struct
 {
-    uint32_t state : 3;
-    uint32_t failures : 2;
-    uint32_t samples : 6;
-    bool     b_valid : 1;
-    bool     b_on_hump : 1;
-    bool     b_started : 1;
-    bool     b_finished : 1;
-    bool     b_impact : 1;
-    bool     b_overflow : 1;
-    uint32_t pitch : 7;
-    uint32_t peak_mm : 8;
-    uint32_t height_centi_mm : 16;
-    uint32_t peak_centi_mm : 16;
-    uint32_t baseline_mg : 10;
-    uint32_t last_speed : 10;
-    uint32_t last_distance : 12;
-    uint32_t climb_ms : 12;
-    uint32_t hump_ms : 14;
-    uint32_t fractional : 5;
-    uint32_t calibration_sum : 15;
+    int16_t  accel_mg[TERRAIN_AXES]; /* chip X, Y, Z in milli-g */
+    int16_t  speed_mm_s;             /* signed centre speed from Motion */
+    int16_t  left_mm_s;              /* signed wheel speeds, for turn rate */
+    int16_t  right_mm_s;
+    uint32_t distance_mm : 12;   /* Motion odometer, wraps at 4096 mm */
+    bool     b_imu_ok : 1;       /* false: the I2C read failed */
+    bool     b_motion_fresh : 1; /* false: Motion data older than 20 ms */
+} terrain_input_t;
+
+/** @brief Task-local terrain state. Not shared, so no lock is needed.  * Bounded states, counters and flags are packed into unsigned bit-fields. Signed working values (filters, height) use plain fixed-width integers: BARR-C forbids signed bit-fields, and offset-encoding them would add an add/subtract to every 10-ms step for no RAM saving worth having. /
+typedef struct
+{
+    uint32_t state : 3;          /* TERRAIN_CALIBRATING..SENSOR_FAULT */
+    uint32_t motion : 3;         /* TERRAIN_MOTION_* */
+    uint32_t failures : 2;       /* consecutive I2C failures, 0..3 */
+    uint32_t cal_samples : 6;    /* still samples collected, 0..32 */
+    uint32_t stale_run : 4;      /* consecutive stale Motion samples, 0..15 */
+    uint32_t confirm_mm : 6;     /* travel above 5 deg while arming, 0..63 */
+    uint32_t last_distance : 12; /* odometer at the last used sample */
+    uint32_t phase_ms : 14;      /* time in the current phase, 0..10000 */
+    uint32_t hump_ms : 14;       /* time since the hump started, 0..10000 */
+    uint32_t gate_ms : 9;        /* landing-gate time left, 0..300 */
+    uint32_t impact_run : 2;     /* samples above impact threshold, 0..3 */
+    uint32_t pitch_field : 7;    /* telemetry pitch, 0.5 deg, offset 64 */
+    uint32_t hump_peak_mm : 8;   /* peak of the last finished hump */
+    uint32_t run_peak_mm : 8;    /* highest valid peak of the run */
+    bool     b_calibrated : 1;   /* boot calibration has completed */
+    bool     b_arming : 1;       /* nose above 2 deg, hump not confirmed */
+    bool     b_wait_flat : 1;    /* hump ended: re-arm only after flat */
+    bool     b_on_hump : 1;      /* ON_HUMP: confirmed climb until LEVEL */
+    bool     b_hump_valid : 1;   /* current/last hump is trustworthy */
+    bool     b_peak_valid : 1;   /* run_peak_mm comes from a valid hump */
+    bool     b_have_last : 1;    /* last_distance holds a real sample */
+    bool     b_started : 1;      /* event this step: hump confirmed */
+    bool     b_finished : 1;     /* event this step: hump ended */
+    bool     b_impact : 1;       /* event this step: impact detected */
+    bool     b_motion_changed : 1; /* event this step: motion changed */
+    bool     b_request_init : 1;   /* caller must (re)initialise the chip */
+    int16_t  height_cmm;           /* running height of this hump, 0.01 mm */
+    int16_t  peak_cmm;             /* highest height of this hump, 0.01 mm */
+    int8_t   carry_um;             /* remainder below 0.01 mm, -9..9 um */
+    int16_t  forward_x8;           /* filtered forward accel, mg x 8 */
+    int16_t  speed_x8;             /* filtered speed, mm/s x 8 */
+    int16_t  accel_kin_mg;         /* filtered encoder acceleration, mg */
+    int16_t  sin_milli;            /* pitch vs flat baseline, sin x 1000 */
+    int16_t  turn_dps;             /* yaw rate from wheel speeds, deg/s */
+    int32_t  baseline_x256;        /* flat-ground forward reading, mg x 256 */
+    int32_t  cal_forward_sum;      /* calibration sums, mg */
+    int32_t  cal_up_sum;
 } terrain_t;
 
-/** @brief Reset calibration and invalidate height until stationary samples.
+/** @brief Start calibrating and ask the caller to initialise the IMU.
 
-`void terrain_step(terrain_t * p_terrain, int16_t accel_x, int16_t accel_y, int16_t accel_z, int16_t speed, uint16_t distance, bool b_fresh);`
+`void terrain_step(terrain_t * p_terrain, const terrain_input_t * p_input);`
 
-Readings are signed milli-g; motion speed is signed mm/s. @param b_fresh False means I2C or motion data exceeded the 20-ms limit.
+Advance the terrain statechart by one 10-ms sample.
+
+`bool terrain_ready(const terrain_t * p_terrain);`
+
+True once Safety may stop waiting: calibrated or faulted.
+
+`uint32_t terrain_pitch_field(int32_t pitch_cdeg);`
+
+Encode pitch in 0.01 deg as 7 bits: 0.5 deg steps, offset 64. Saturates at -32.0 and +31.5 deg; never wraps.
+
+`int32_t terrain_pitch_cdeg(uint32_t field);`
+
+Decode a 7-bit pitch field back to 0.01 deg.
+
+`uint32_t terrain_peak_mm(int32_t height_cmm);`
+
+Round a height in 0.01 mm to whole mm, saturating at 0..255.
+
+`uint16_t terrain_event_pack(bool b_finished, uint32_t peak_mm, bool b_valid);`
+
+Pack a hump event: finished bit 0, peak bits 1-8, valid bit 9.
+
+`bool terrain_event_unpack(uint16_t event, bool * pb_finished, uint32_t * p_peak_mm, bool * pb_valid);`
+
+Unpack a hump event; false if any reserved bit is set.
+
+`int32_t terrain_atan2_cdeg(int32_t y, int32_t x);`
+
+Integer atan2 in 0.01 deg, error under 0.1 deg. @pre |y| and |x| are below 2^19.
+
+`uint32_t terrain_isqrt(uint32_t value);`
+
+Integer square root, rounded down.
 
 ## app_program/subsystem5/navigation.h
 
@@ -376,6 +509,12 @@ typedef struct
     bool     b_estop : 1;
     uint32_t barcode : 2;
     uint32_t elapsed_ms : 14;
+    uint32_t look : 3;
+    uint32_t left_cm : 9;
+    uint32_t right_cm : 9;
+    uint32_t side_mm : 12;
+    uint32_t steps : 5;
+    bool     b_margin : 1;
     uint32_t command;
 } navigation_t;
 
@@ -438,14 +577,14 @@ Return an outlier-resistant median without adding readings.
 
 Validate the operator movement sequence without energizing hardware.
 
+## testing/host/terrain_test.h
+
+`void terrain_test_run(void);`
+
+Run every terrain check; an assertion stops at the first failure.
+
 ## testing/host/verify_main.h
 
 `int main(void);`
 
 Run boundary, fault-injection and cross-subsystem scenarios.
-
-## lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.h
-
-`void mqtt_utk_start(void);`
-
-Poll connection readiness from the existing WiFi service task.

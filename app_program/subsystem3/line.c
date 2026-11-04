@@ -13,22 +13,25 @@
 #define LINE_CALIBRATION_COUNT 32u
 #define LINE_BARCODE_SEGMENTS 6u
 
+_Static_assert(ROBOT_LINE_STEER_MM_SECOND <= 127u,
+               "steering must fit the offset-binary 8-bit error field");
+
 static void barcode_step(line_t * p_line, bool b_black, uint16_t distance);
 static void barcode_transition(line_t * p_line, uint16_t width);
 static bool narrow_bar(uint16_t width);
 
 /** @brief A valid bit distinguishes an undecoded symbol from LEFT. */
-void line_init (line_t * p_line)
+void line_init(line_t * p_line)
 {
     memset(p_line, 0, sizeof(*p_line));
     p_line->error            = 127u;
-    p_line->threshold_left   = ROBOT_IR_THRESHOLD;
-    p_line->threshold_centre = ROBOT_IR_THRESHOLD;
-    p_line->threshold_right  = ROBOT_IR_THRESHOLD;
+    p_line->threshold_left   = ROBOT_IR_THRESHOLD_LEFT;
+    p_line->threshold_centre = ROBOT_IR_THRESHOLD_CENTRE;
+    p_line->threshold_right  = ROBOT_IR_THRESHOLD_RIGHT;
 }
 
 /** @brief Preserve all 12 ADC bits; reject insufficient contrast. */
-bool line_calibrate (line_t * p_line, const uint16_t * p_white,
+bool line_calibrate(line_t * p_line, const uint16_t * p_white,
                     const uint16_t * p_black)
 {
     bool     b_valid                    = true;
@@ -55,7 +58,7 @@ bool line_calibrate (line_t * p_line, const uint16_t * p_white,
 }
 
 /** @brief Barcode and junction suppression is bounded by explicit timers. */
-void line_step (line_t * p_line, const uint16_t * p_samples, uint16_t distance,
+void line_step(line_t * p_line, const uint16_t * p_samples, uint16_t distance,
                bool b_planned_departure)
 {
     p_line->b_barcode_valid = false;
@@ -74,6 +77,15 @@ void line_step (line_t * p_line, const uint16_t * p_samples, uint16_t distance,
     int32_t difference   = p_samples[1];
     difference -= p_samples[0];
     int32_t error = (0 == total) ? 0 : ((difference * 127) / total);
+
+    if (0u != ROBOT_LINE_STRADDLE)
+    {
+        /* One black sensor steers toward its side; both equal go straight. */
+        int32_t steer = (int32_t)ROBOT_LINE_STEER_MM_SECOND;
+        error         = b_left ? -steer : steer;
+        error         = (b_left == b_centre) ? 0 : error;
+    }
+
     /* Normalized steering is -127..127; its bias fits exactly in 8 bits. */
     p_line->error = (uint32_t)(error + 127);
 
@@ -93,8 +105,10 @@ void line_step (line_t * p_line, const uint16_t * p_samples, uint16_t distance,
         barcode_step(p_line, b_right, distance);
     }
 
+    /* In straddle mode two black sensors already mark a junction. */
+    bool b_crossing = b_right || (0u != ROBOT_LINE_STRADDLE);
     bool b_junction =
-        b_left && b_centre && b_right && (LINE_SCAN != p_line->state);
+        b_left && b_centre && b_crossing && (LINE_SCAN != p_line->state);
 
     if (b_junction && (p_line->junction_ms < 300u))
     {
@@ -115,8 +129,10 @@ void line_step (line_t * p_line, const uint16_t * p_samples, uint16_t distance,
         p_line->junction_ms = 0u;
     }
 
+    /* White/white is normal in straddle mode, so it never means lost. */
     bool b_suppress = b_planned_departure || (LINE_SCAN == p_line->state) ||
-                      (LINE_JUNCTION == p_line->state);
+                      (LINE_JUNCTION == p_line->state) ||
+                      (0u != ROBOT_LINE_STRADDLE);
 
     if ((p_line->b_line_valid) || b_suppress)
     {
@@ -142,14 +158,14 @@ void line_step (line_t * p_line, const uint16_t * p_samples, uint16_t distance,
 }
 
 /** @brief Offset binary avoids signed shifts in packed application data. */
-int16_t line_error (const line_t * p_line)
+int16_t line_error(const line_t * p_line)
 {
     /* The field is 0..254, so subtracting its bias fits int16_t. */
     return (int16_t)((int32_t)p_line->error - 127);
 }
 
 /** @brief Consume right-sensor edges only after a valid 24..36-mm guard. */
-static void barcode_step (line_t * p_line, bool b_black, uint16_t distance)
+static void barcode_step(line_t * p_line, bool b_black, uint16_t distance)
 {
     bool    b_changed = (b_black != p_line->b_last_black);
     int16_t signed_width =
@@ -188,7 +204,7 @@ static void barcode_step (line_t * p_line, bool b_black, uint16_t distance)
 }
 
 /** @brief Odd segments are white gaps; even segments carry black symbols. */
-static void barcode_transition (line_t * p_line, uint16_t width)
+static void barcode_transition(line_t * p_line, uint16_t width)
 {
     bool b_black_ended = p_line->b_last_black;
 
@@ -239,7 +255,7 @@ static void barcode_transition (line_t * p_line, uint16_t width)
 }
 
 /** @brief The gap between narrow and wide bands rejects ambiguous widths. */
-static bool narrow_bar (uint16_t width)
+static bool narrow_bar(uint16_t width)
 {
     return (width >= 4u) && (width <= 12u);
 }

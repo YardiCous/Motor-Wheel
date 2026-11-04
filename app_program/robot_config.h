@@ -5,9 +5,9 @@
 #define ROBOT_CONFIG_H
 #if (OBSTACLE_TEST || LINE_TEST)
 /* Bench tests: slow enough to watch, and the search gets time to finish. */
-#define ROBOT_CRUISE_MM_SECOND 100u
-#define ROBOT_CAUTIOUS_MM_SECOND 100u
-#define ROBOT_TURN_MM_SECOND 100u
+#define ROBOT_CRUISE_MM_SECOND 70u
+#define ROBOT_CAUTIOUS_MM_SECOND 80u
+#define ROBOT_TURN_MM_SECOND 70u
 #define ROBOT_SEARCH_MS 5000u
 #else
 #define ROBOT_CRUISE_MM_SECOND 500u
@@ -21,6 +21,11 @@
  * for (960 edges, 140 mm), so they test logic, not this robot's numbers. */
 #ifndef ROBOT_ENCODER_EDGES_TURN
 #define ROBOT_ENCODER_EDGES_TURN 2400u
+
+/* Per-sensor black thresholds; each sensor reads white differently. */
+#define ROBOT_IR_THRESHOLD_LEFT 450u
+#define ROBOT_IR_THRESHOLD_CENTRE 300u
+#define ROBOT_IR_THRESHOLD_RIGHT ROBOT_IR_THRESHOLD
 #endif /* ROBOT_ENCODER_EDGES_TURN */
 /* Estimated from the turn tests (a 280 setting gave 90 degrees with the old
  * 960 scale, so 280 / 2.5 = 112). Replace with the measured wheel spacing. */
@@ -52,7 +57,17 @@
 #define ROBOT_BYPASS_FWD_MARGIN_MM 200u
 #define ROBOT_BYPASS_MAX_STEPS 15u
 #define ROBOT_RANGE_MAX_CM 400u
-#define ROBOT_IR_THRESHOLD 600u
+#define ROBOT_IR_THRESHOLD 450u
+/* Line following mode. 1: the tape runs between the left (GP26) and centre
+ * (GP27) sensors, so white/white means on the line and goes straight; a sensor
+ * that sees black steers toward its side until both are white again; and
+ * black/black is a junction, which goes straight for now. 0: the original
+ * proportional steering. Host tests use 0, the mode they were written for. */
+#ifndef ROBOT_LINE_STRADDLE
+#define ROBOT_LINE_STRADDLE 1u
+#endif /* ROBOT_LINE_STRADDLE */
+/* Steering in mode 1: one wheel speeds up and the other slows by this much. */
+#define ROBOT_LINE_STEER_MM_SECOND 70u
 #define ROBOT_IMPACT_MG 2500
 #define ROBOT_IMU_CAL_SAMPLES 32u
 #define ROBOT_START_PIN 20u

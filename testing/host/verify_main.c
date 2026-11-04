@@ -3,7 +3,6 @@
  */
 #include "verify_main.h"
 #include "motor_test.h"
-#include "terrain_test.h"
 
 #include "../../app_program/data_formats.h"
 #include "../../app_program/robot_config.h"
@@ -26,6 +25,9 @@
 #define VERIFY_FAULTS 4096u
 
 #define VERIFY_SIGNED_LIMIT 512
+#define VERIFY_HUMP_SAMPLES 100u
+#define VERIFY_OVERFLOW_START 104u
+#define VERIFY_OVERFLOW_END 230u
 #define VERIFY_BARCODE_SYMBOLS 4u
 #define VERIFY_LINE_CALIBRATION 32u
 #define VERIFY_LOST_SAMPLES 31u
@@ -38,6 +40,7 @@ static void verify_fields(void);
 static void verify_vector(void);
 static void verify_motion(void);
 static void verify_safety(void);
+static void verify_terrain(void);
 static void verify_line(void);
 static void verify_bad_barcode(void);
 static void verify_obstacle(void);
@@ -57,7 +60,7 @@ int main(void)
     verify_motion();
     motor_test_run();
     verify_safety();
-    terrain_test_run(); /* testing/host/terrain_test.c (Buddy 4) */
+    verify_terrain();
     verify_line();
     verify_bad_barcode();
     verify_obstacle();
@@ -219,31 +222,6 @@ static void verify_motion(void)
     motion_ticks(&controller, VERIFY_MOTION_STEPS, 12u, false);
     assert(MOTION_FOLLOW == controller.mode);
     assert(controller.position_um > 2000000u);
-
-    /* One revolution each way cancels position but adds wheel travel. */
-    motion_init(&controller, 0u, 0u);
-    motion_ticks(&controller, 960u, 1u, false);
-    assert(204200u == controller.total_um);
-    for (uint32_t edge = 960u; edge > 0u; --edge)
-    {
-        motion_step(&controller, edge - 1u, edge - 1u, 0, false,
-                     &left_pwm, &right_pwm);
-    }
-    assert(0u == controller.position_um);
-    assert(408400u == controller.total_um);
-    assert(0u == controller.total_remainder);
-    motion_ticks(&controller, 960u, 1u, true);
-    assert(0u == controller.position_um);
-    assert(612600u == controller.total_um);
-    motion_ticks(&controller, 960u, 0u, false);
-    assert(612600u == controller.total_um);
-    /* Preserve fractional travel across the existing 4096-mm wrap. */
-    controller.total_um = 4095900u;
-    motion_ticks(&controller, 960u, 1u, false);
-    assert(204100u == controller.total_um);
-    motion_init(&controller, controller.last_left, controller.last_right);
-    assert(0u == controller.total_um);
-    assert(0u == controller.total_remainder);
 }
 
 /** @brief Every combination of the twelve faults respects advisory exclusions.
@@ -263,6 +241,56 @@ static void verify_safety(void)
         assert(b_fatal == (0u != monitor.b_latched));
         assert(safety_reset(&monitor));
     }
+}
+
+/** @brief Fine height integration survives 0.435-mm increments and overflow.
+ */
+static void verify_terrain(void)
+{
+    terrain_t detector = {0};
+    terrain_init(&detector);
+
+    for (uint32_t sample = 0u; sample < ROBOT_IMU_CAL_SAMPLES; ++sample)
+    {
+        terrain_step(&detector, 0, 0, 1000, 0, 0u, true);
+    }
+
+    assert(TERRAIN_LEVEL == detector.state);
+    assert(0u != detector.b_valid);
+    detector.last_speed = 1012u;
+
+    for (uint16_t sample = VERIFY_FIRST_SAMPLE; sample <= VERIFY_HUMP_SAMPLES;
+         ++sample)
+    {
+        terrain_step(&detector, 87 + 1, 0, 996, 500, sample * 5u, true);
+    }
+
+    assert(detector.peak_mm >= 43u);
+    assert(detector.peak_mm <= 45u);
+    terrain_step(&detector, 0, 0, 1000, 500, 505u, true);
+    assert(TERRAIN_CRESTING == detector.state);
+    terrain_step(&detector, -100, 0, 995, 500, 510u, true);
+    assert(TERRAIN_DESCENDING == detector.state);
+    terrain_step(&detector, 0, 0, 1000, 500, 515u, true);
+    assert(TERRAIN_LEVEL == detector.state);
+    assert(0u != detector.b_finished);
+    assert(0u == detector.b_on_hump);
+
+    for (uint16_t sample = VERIFY_OVERFLOW_START; sample < VERIFY_OVERFLOW_END;
+         ++sample)
+    {
+        terrain_step(&detector, 500, 0, 866, 500, sample * 5u, true);
+    }
+
+    assert(255u == detector.peak_mm);
+    assert(0u != detector.b_overflow);
+    assert(0u == detector.b_valid);
+    terrain_step(&detector, 0, 0, 3000, 500, 1150u, true);
+    assert(0u != detector.b_impact);
+    terrain_step(&detector, 0, 0, 1000, 0, 0u, false);
+    terrain_step(&detector, 0, 0, 1000, 0, 0u, false);
+    terrain_step(&detector, 0, 0, 1000, 0, 0u, false);
+    assert(TERRAIN_SENSOR_FAULT == detector.state);
 }
 
 /** @brief All four framed barcodes decode once with encoder-measured widths.

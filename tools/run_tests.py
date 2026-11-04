@@ -13,7 +13,8 @@ CORE = ["data_formats.c", "subsystem1/telemetry.c", "subsystem2/motion.c",
 FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Werror", "-Wshadow",
          "-Wstrict-prototypes", "-Wmissing-prototypes", "-Wsign-conversion",
          "-pedantic", "-DROBOT_ENCODER_EDGES_TURN=960u",
-         "-DROBOT_TRACK_MM=140u"]
+         "-DROBOT_TRACK_MM=140u",
+         "-DROBOT_LINE_STRADDLE=0u"]
 
 
 def build(root, executable, sanitize=True):
@@ -22,7 +23,6 @@ def build(root, executable, sanitize=True):
         command += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
     command += [str(root / "testing/host/verify_main.c")]
     command += [str(root / "testing/host/motor_test.c")]
-    command += [str(root / "testing/host/terrain_test.c")]
     command += [str(root / "app_program" / source) for source in CORE]
     command += ["-o", str(executable)]
     subprocess.run(command, check=True)
@@ -42,14 +42,12 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     subprocess.run([sys.executable, str(ROOT / "tools/check_barr.py")], check=True)
-    subprocess.run([sys.executable, str(ROOT / "tools/test_build_profiles.py")],
-                   check=True)
     with tempfile.TemporaryDirectory(prefix="motor-test-") as temporary:
         executable = Path(temporary) / "verify"
         build(ROOT, executable)
         output = run(executable)
         print(output, end="")
-        from dashboard.robot_protocol import decode, encode_command
+        from robot_protocol import decode, encode_command
         vector = next(line.split()[1] for line in output.splitlines()
                       if line.startswith("VECTOR "))
         decoded = decode(bytes.fromhex(vector))

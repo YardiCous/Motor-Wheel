@@ -10,6 +10,7 @@
 #include "terrain_test.h"
 
 #include "../../app_program/data_formats.h"
+#include "../../app_program/robot_config.h"
 #include "../../app_program/subsystem4/terrain.h"
 #include "../../app_program/subsystem4/terrain_config.h"
 
@@ -634,11 +635,14 @@ static void test_classification(void)
     assert(TERRAIN_MOTION_ACCELERATING == sim.terrain.motion);
     sim_wait(&sim, 200u, 500, 0, SIM_FLAT_COS);
     assert(TERRAIN_MOTION_CRUISING == sim.terrain.motion);
-    sim.turn_mm_s = 100; /* 200 mm/s difference on a 280-mm track */
+    sim.turn_mm_s = 100; /* 200 mm/s difference across the configured track */
     sim_step(&sim, 500, 0, SIM_FLAT_COS);
     assert(TERRAIN_MOTION_TURNING == sim.terrain.motion);
     assert(sim.terrain.b_motion_changed);
-    assert((sim.terrain.turn_dps >= 40) && (sim.terrain.turn_dps <= 42));
+    int32_t expected_turn =
+        (2 * sim.turn_mm_s * 573) / (10 * (int32_t)ROBOT_TRACK_MM);
+    assert((sim.terrain.turn_dps >= (expected_turn - 1)) &&
+           (sim.terrain.turn_dps <= (expected_turn + 1)));
     sim_step(&sim, 500, 0, SIM_FLAT_COS);
     assert(!sim.terrain.b_motion_changed);
     (void)printf("TERRAIN: classes stationary/accelerating/cruising/turning "

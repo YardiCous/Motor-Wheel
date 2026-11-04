@@ -104,6 +104,32 @@ rules. See [coding_standard.md](docs/coding_standard.md) for the review scope.
 
 ## Binary MQTT
 
+### Live dashboard
+
+Install the MQTT dependency once, then run the Python launcher. It opens a
+local browser dashboard, automatically subscribes to the firmware topics,
+and decodes live telemetry using the existing protocol decoder.
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r tools/dashboard/requirements-dashboard.txt
+python tools/dashboard/telemetry_dashboard.py
+
+# Preview simulated readings without a robot or extra dependencies:
+python3 tools/dashboard/telemetry_dashboard.py --demo
+```
+
+The broker address is read from `config/wifi_secrets.h`; override it with
+`--broker 192.168.1.10`. See [dashboard setup and custom Python decoders](docs/telemetry_dashboard.md)
+for virtual environment setup, connection options and adding readings without
+editing the frontend.
+
+### Wire protocol
+
+MQTT topic names are declared in `app_program/subsystem1/telemetry.h`.
+After changing them, rebuild and flash the firmware and update subscribers.
+
 All MQTT calls run inside the existing core-0 WiFi service. Application tasks
 use bounded nonblocking queues; they never call lwIP or CYW43 directly.
 
@@ -115,9 +141,9 @@ use bounded nonblocking queues; they never call lwIP or CYW43 directly.
 | `robot/ack` | 1 byte; echoed command2/sequence4, accepted1, malformed1 |
 
 ```sh
-python3 tools/robot_protocol.py command stop 0
-python3 tools/robot_protocol.py command start 1
-python3 tools/robot_protocol.py decode e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e
+python3 tools/dashboard/robot_protocol.py command stop 0
+python3 tools/dashboard/robot_protocol.py command start 1
+python3 tools/dashboard/robot_protocol.py decode e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e
 ```
 
 Send commands without MQTT retain. Each new MQTT connection requires a fresh

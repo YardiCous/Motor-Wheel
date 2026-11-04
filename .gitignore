@@ -26,5 +26,6 @@ config/wifi_secrets.h
 .DS_Store
 
 # Local Python tooling
+.venv/
 __pycache__/
 *.pyc

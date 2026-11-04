@@ -26,11 +26,10 @@
 #define BOARD_TRIGGER_IRQ 3u
 #define BOARD_ADC_TIMEOUT_US 100u
 #define BOARD_I2C_TIMEOUT_US 1500u
-#define BOARD_IMU_BYTES 6u
+#define BOARD_I2C_MAX_READ 8u /* plus the address byte, fits the TX FIFO */
 #define BOARD_GPIO_BANKS 3u
 #define BOARD_GPIO_PINS 30u
 #define BOARD_MOTOR_TOP 6249u
-#define BOARD_IMU_ADDRESS 0x19u
 
 #define BOARD_FIRST_MOTOR_PIN 8u
 #define BOARD_LAST_PWM_PIN 12u
@@ -62,7 +61,8 @@ static void     write_reg(uint32_t address, uint32_t value);
 static void     configure_pin(uint8_t pin, uint8_t function, bool b_output,
                               bool b_pullup);
 static bool     i2c_wait(uint32_t offset, uint32_t mask);
-static bool     i2c_transfer(uint8_t address, uint8_t value, uint8_t * p_bytes,
+static void     i2c_target(uint8_t address);
+static bool     i2c_transfer(uint8_t reg, uint8_t value, uint8_t * p_bytes,
                              uint8_t length);
 static void     encoder_edge(uint32_t inputs, bool b_left);
 static void     board_gpio_isr(uint32_t number);
@@ -244,8 +244,11 @@ bool board_io_line (uint16_t * p_samples)
     return b_valid;
 }
 
-/** @brief 400-kHz I2C assumes the repository's 125-MHz peripheral clock. */
-bool board_io_imu_init (void)
+/** @brief 400-kHz I2C assumes the repository's 125-MHz peripheral clock.
+ * Chip-specific setup lives in subsystem4/drv_lsm303.c, which identifies
+ * LSM303DLHC or LSM303D at run time.
+ */
+void board_io_i2c_init (void)
 {
     write_reg(BOARD_I2C + 0x6cu, 0u);
     write_reg(BOARD_I2C, 0x65u);
@@ -253,41 +256,30 @@ bool board_io_imu_init (void)
     write_reg(BOARD_I2C + 0x20u, 187u);
     write_reg(BOARD_I2C + 0xa0u, 10u);
     write_reg(BOARD_I2C + 0x7cu, 38u);
-    write_reg(BOARD_I2C + 4u, BOARD_IMU_ADDRESS);
     write_reg(BOARD_I2C + 0x6cu, 1u);
-    bool b_valid = i2c_transfer(0x20u, 0x57u, NULL, 0u);
-    b_valid      = b_valid && (i2c_transfer(0x23u, 0x98u, NULL, 0u));
-    return b_valid;
 }
 
-/** @brief BDU and auto-increment provide one coherent high-resolution sample.
- */
-bool board_io_imu (int16_t * p_x, int16_t * p_y, int16_t * p_z)
+/** @brief Register address, repeated start, then up to eight data reads. */
+bool board_io_i2c_read (uint8_t address, uint8_t reg, uint8_t * p_bytes,
+                        uint8_t length)
 {
-    uint8_t bytes[BOARD_IMU_BYTES] = {0u};
-    int16_t axes[ROBOT_IR_COUNT]   = {0};
-    bool    b_valid = i2c_transfer(0xa8u, 0u, bytes, BOARD_IMU_BYTES);
+    bool b_valid = (NULL != p_bytes) && (length > 0u) &&
+                   (length <= BOARD_I2C_MAX_READ);
 
     if (b_valid)
     {
-        for (uint8_t axis = 0u; axis < ROBOT_IR_COUNT; ++axis)
-        {
-            uint32_t raw =
-                bytes[axis * 2u] | ((uint32_t)bytes[(axis * 2u) + 1u] << 8u);
-            /* Raw is 0..65535; subtract before scaling to avoid signed shifts.
-             */
-            int32_t signed_raw =
-                (raw >= 32768u) ? ((int32_t)raw - 65536) : (int32_t)raw;
-            /* +/-4g HR mode is 2 mg per 12-bit digit, left aligned. */
-            axes[axis] = (int16_t)((signed_raw / 16) * 2);
-        }
-
-        *p_x = axes[0];
-        *p_y = axes[1];
-        *p_z = axes[2];
+        i2c_target(address);
+        b_valid = i2c_transfer(reg, 0u, p_bytes, length);
     }
 
     return b_valid;
+}
+
+/** @brief Register address and value in one transaction. */
+bool board_io_i2c_write (uint8_t address, uint8_t reg, uint8_t value)
+{
+    i2c_target(address);
+    return i2c_transfer(reg, value, NULL, 0u);
 }
 
 /** @brief 500..2500-us pulses map the configured 180-degree servo range. */
@@ -380,13 +372,23 @@ static bool i2c_wait (uint32_t offset, uint32_t mask)
     return (!b_aborted) && (0u != (read_reg(BOARD_I2C + offset) & mask));
 }
 
-/** @brief Six receive requests fit entirely in the hardware's 16-entry FIFO.
+/** @brief IC_TAR may change only while the controller is disabled
+ * (RP2040 datasheet 4.3; the Pico SDK does the same per transfer).
  */
-static bool i2c_transfer (uint8_t address, uint8_t value, uint8_t * p_bytes,
+static void i2c_target (uint8_t address)
+{
+    write_reg(BOARD_I2C + 0x6cu, 0u);
+    write_reg(BOARD_I2C + 4u, address);
+    write_reg(BOARD_I2C + 0x6cu, 1u);
+}
+
+/** @brief Up to eight receive requests fit in the hardware's 16-entry FIFO.
+ */
+static bool i2c_transfer (uint8_t reg, uint8_t value, uint8_t * p_bytes,
                          uint8_t length)
 {
     (void)read_reg(BOARD_I2C + 0x40u);
-    write_reg(BOARD_I2C + 0x10u, address);
+    write_reg(BOARD_I2C + 0x10u, reg);
     bool b_valid = true;
 
     if (0u == length)

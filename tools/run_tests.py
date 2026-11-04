@@ -22,6 +22,7 @@ def build(root, executable, sanitize=True):
         command += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
     command += [str(root / "testing/host/verify_main.c")]
     command += [str(root / "testing/host/motor_test.c")]
+    command += [str(root / "testing/host/terrain_test.c")]
     command += [str(root / "app_program" / source) for source in CORE]
     command += ["-o", str(executable)]
     subprocess.run(command, check=True)
@@ -46,7 +47,7 @@ def main():
         build(ROOT, executable)
         output = run(executable)
         print(output, end="")
-        from robot_protocol import decode, encode_command
+        from dashboard.robot_protocol import decode, encode_command
         vector = next(line.split()[1] for line in output.splitlines()
                       if line.startswith("VECTOR "))
         decoded = decode(bytes.fromhex(vector))

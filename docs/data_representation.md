@@ -87,11 +87,16 @@ and the units for biased fields are described below and in the headers.
 | robot_os / shared_t | `b_network_online` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_visible` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_lost` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `total_distance_mm` | 0..4095 | 12 | unsigned bit-field |
 | robot_os / shared_t | `reset_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / cyclic_t | `phase` | 0..99 | 7 | unsigned bit-field |
 | robot_os / buttons_t | `stable_count` | 0..3 | 2 | unsigned bit-field |
 | robot_os / buttons_t | `candidate` | 0..7 | 3 | unsigned bit-field |
 | robot_os / buttons_t | `previous` | 0..7 | 3 | unsigned bit-field |
+| mqtt_utk / mqtt_utk_state_t | `state` | 0..4 | 3 | unsigned bit-field |
+| mqtt_utk / mqtt_utk_state_t | `retry_exponent` | 0..5 | 3 | unsigned bit-field |
+| mqtt_utk / mqtt_utk_state_t | `b_timer_started` | 0..1 | 1 | bool bit-field |
+| mqtt_utk / mqtt_utk_state_t | `retry_at` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | telemetry / telemetry_t | `payload` | 0..255 | 8 | unsigned bit-field |
 | telemetry / telemetry_t | `received` | 0..1 | 1 | unsigned bit-field |
 | telemetry / telemetry_t | `b_bad` | 0..1 | 1 | bool bit-field |
@@ -101,6 +106,8 @@ and the units for biased fields are described below and in the headers.
 | encoder_test / encoder_test_t | `last_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | encoder_test / encoder_test_t | `last_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | motion / motion_t | `position_um` | 0..4095999 | 22 | unsigned bit-field |
+| motion / motion_t | `total_um` | 0..4194303 | 22 | unsigned bit-field |
+| motion / motion_t | `total_remainder` | 0..1023 | 10 | unsigned bit-field |
 | motion / motion_t | `mode` | 0..6 | 3 | unsigned bit-field |
 | motion / motion_t | `b_reverse` | 0..1 | 1 | bool bit-field |
 | motion / motion_t | `b_done` | 0..1 | 1 | bool bit-field |
@@ -194,10 +201,6 @@ and the units for biased fields are described below and in the headers.
 | obstacle / obstacle_t | `b_valid` | 0..1 | 1 | bool bit-field |
 | obstacle / obstacle_t | `b_ready` | 0..1 | 1 | bool bit-field |
 | obstacle / obstacle_t | `scan_ms` | 0..5000 | 13 | unsigned bit-field |
-| mqtt_utk / mqtt_utk_state_t | `state` | 0..4 | 3 | unsigned bit-field |
-| mqtt_utk / mqtt_utk_state_t | `retry_exponent` | 0..5 | 3 | unsigned bit-field |
-| mqtt_utk / mqtt_utk_state_t | `b_timer_started` | 0..1 | 1 | bool bit-field |
-| mqtt_utk / mqtt_utk_state_t | `retry_at` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 
 ## Other shared fields and queue representations
 

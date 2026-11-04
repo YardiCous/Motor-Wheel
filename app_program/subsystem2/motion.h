@@ -21,6 +21,8 @@ typedef struct
     uint32_t last_left;
     uint32_t last_right;
     uint32_t position_um : 22;
+    uint32_t total_um : 22;
+    uint32_t total_remainder : 10;
     uint32_t mode : 3;
     bool     b_reverse : 1;
     bool     b_done : 1;

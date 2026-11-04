@@ -31,7 +31,7 @@ have the entire unsigned 32-bit modulo range as their valid domain.
 | ir_right | 73 | 12 | 0..4095 ADC counts |
 | terrain | 85 | 3 | 0..6 |
 | pitch_offset | 88 | 7 | 0..127 = -32..31.5 degrees |
-| peak_mm | 95 | 8 | 0..255 mm, highest valid hump of the run; saturates, never wraps; a saturated hump is invalid |
+| peak_mm | 95 | 8 | 0..255 mm; overflow sets RANGE and clears validity |
 | range_cm | 103 | 9 | 2..400 cm; 0 means invalid; 1 and 401..511 rejected |
 | servo_3deg | 112 | 6 | 0..60 = 0..180 degrees; selected profile angle in PLAN, otherwise commanded servo angle |
 | barcode_event | 118 | 3 | code2 + known1; last valid barcode, not a queue pulse |
@@ -87,7 +87,6 @@ and the units for biased fields are described below and in the headers.
 | robot_os / shared_t | `b_network_online` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_visible` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_lost` | 0..1 | 1 | bool bit-field |
-| robot_os / shared_t | `total_distance_mm` | 0..4095 | 12 | unsigned bit-field |
 | robot_os / shared_t | `reset_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / cyclic_t | `phase` | 0..99 | 7 | unsigned bit-field |
 | robot_os / buttons_t | `stable_count` | 0..3 | 2 | unsigned bit-field |
@@ -106,8 +105,6 @@ and the units for biased fields are described below and in the headers.
 | encoder_test / encoder_test_t | `last_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | encoder_test / encoder_test_t | `last_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | motion / motion_t | `position_um` | 0..4095999 | 22 | unsigned bit-field |
-| motion / motion_t | `total_um` | 0..4194303 | 22 | unsigned bit-field |
-| motion / motion_t | `total_remainder` | 0..4095 | 12 | unsigned bit-field |
 | motion / motion_t | `mode` | 0..6 | 3 | unsigned bit-field |
 | motion / motion_t | `b_reverse` | 0..1 | 1 | bool bit-field |
 | motion / motion_t | `b_done` | 0..1 | 1 | bool bit-field |
@@ -145,7 +142,7 @@ and the units for biased fields are described below and in the headers.
 | line / line_t | `threshold_left` | 0..4095 | 12 | unsigned bit-field |
 | line / line_t | `threshold_centre` | 0..4095 | 12 | unsigned bit-field |
 | line / line_t | `threshold_right` | 0..4095 | 12 | unsigned bit-field |
-| drv_lsm303 / drv_lsm303_t | `variant` | 0..2 | 2 | unsigned bit-field |
+| drv_lsm303 / drv_lsm303_t | `variant` | 0..3 | 2 | unsigned bit-field |
 | drv_lsm303 / drv_lsm303_t | `accel_address` | 0..127 | 7 | unsigned bit-field |
 | drv_lsm303 / drv_lsm303_t | `mag_address` | 0..127 | 7 | unsigned bit-field |
 | imu_test / imu_test_t | `read_us` | 0..65535 | 16 | unsigned bit-field |
@@ -171,13 +168,13 @@ and the units for biased fields are described below and in the headers.
 | terrain / terrain_t | `state` | 0..6 | 3 | unsigned bit-field |
 | terrain / terrain_t | `motion` | 0..7 | 3 | unsigned bit-field |
 | terrain / terrain_t | `failures` | 0..3 | 2 | unsigned bit-field |
-| terrain / terrain_t | `cal_samples` | 0..32 | 6 | unsigned bit-field |
+| terrain / terrain_t | `cal_samples` | 0..63 | 6 | unsigned bit-field |
 | terrain / terrain_t | `stale_run` | 0..15 | 4 | unsigned bit-field |
 | terrain / terrain_t | `confirm_mm` | 0..63 | 6 | unsigned bit-field |
 | terrain / terrain_t | `last_distance` | 0..4095 | 12 | unsigned bit-field |
-| terrain / terrain_t | `phase_ms` | 0..10000 | 14 | unsigned bit-field |
+| terrain / terrain_t | `phase_ms` | 0..16383 | 14 | unsigned bit-field |
 | terrain / terrain_t | `hump_ms` | 0..10000 | 14 | unsigned bit-field |
-| terrain / terrain_t | `gate_ms` | 0..300 | 9 | unsigned bit-field |
+| terrain / terrain_t | `gate_ms` | 0..511 | 9 | unsigned bit-field |
 | terrain / terrain_t | `impact_run` | 0..3 | 2 | unsigned bit-field |
 | terrain / terrain_t | `pitch_field` | 0..127 | 7 | unsigned bit-field |
 | terrain / terrain_t | `hump_peak_mm` | 0..255 | 8 | unsigned bit-field |
@@ -185,6 +182,11 @@ and the units for biased fields are described below and in the headers.
 | terrain / terrain_t | `b_calibrated` | 0..1 | 1 | bool bit-field |
 | terrain / terrain_t | `b_arming` | 0..1 | 1 | bool bit-field |
 | terrain / terrain_t | `b_wait_flat` | 0..1 | 1 | bool bit-field |
+| terrain / terrain_t | `b_side` | 0..1 | 1 | bool bit-field |
+| terrain / terrain_t | `b_side_wait` | 0..1 | 1 | bool bit-field |
+| terrain / terrain_t | `b_confirm_left` | 0..1 | 1 | bool bit-field |
+| terrain / terrain_t | `side_wheel` | 0..3 | 2 | unsigned bit-field |
+| terrain / terrain_t | `side_confirm_mm` | 0..63 | 6 | unsigned bit-field |
 | terrain / terrain_t | `b_on_hump` | 0..1 | 1 | bool bit-field |
 | terrain / terrain_t | `b_hump_valid` | 0..1 | 1 | bool bit-field |
 | terrain / terrain_t | `b_peak_valid` | 0..1 | 1 | bool bit-field |
@@ -229,6 +231,7 @@ and the units for biased fields are described below and in the headers.
 | obstacle / obstacle_t | `scan_ms` | 0..5000 | 13 | unsigned bit-field |
 | terrain_test / sim_t | `seed` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | terrain_test / sim_t | `starts` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| terrain_test / sim_t | `side_starts` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | terrain_test / sim_t | `finishes` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | terrain_test / sim_t | `impacts` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | terrain_test / sim_t | `last_peak_mm` | 0..4294967295 | 32 | 32-bit modulo counter/time |
@@ -258,12 +261,11 @@ and the units for biased fields are described below and in the headers.
   encoder quantization around a 500-mm/s target. Wheel reports use
   -512..511; measurements outside that range set RANGE before saturation.
   Signed PID integrals use bias 16000 and previous errors bias 1000.
-* Terrain running height/peak are int16_t in 0.01-mm units
-  (+/-327.67 mm) with an int8_t micrometre carry -9..9. Signed
-  filter states stay int16_t/int32_t (BARR-C bans signed bit-fields).
-  A hump above 255 mm reports 255 with validity cleared; no fault bit.
-* Terrain filters store mg x8 and mm/s x8; the flat baseline stores
-  mg x256. IMU failures saturate at three; retries and all
+* Fine height/peak are 0..65535 in 0.01-mm units. A signed fractional
+  carry -9..9 is stored as 0..18 with bias 9, in 0.001-mm units.
+  A >255-mm report sets RANGE; saturation never retains valid height.
+* Terrain baseline stores milli-g +500. Last terrain speed stores
+  signed mm/s +512. IMU failures saturate at three; retries and all
   state timers saturate or transition before their bit-field limit.
 * Distance state uses 0..4095999 micrometres (22 bits). The division
   remainder -2399..2399 is stored with bias 2399 (13 bits).

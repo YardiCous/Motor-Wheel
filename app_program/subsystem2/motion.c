@@ -20,8 +20,6 @@
 
 _Static_assert((2u * (ROBOT_ENCODER_EDGES_TURN - 1u)) < 8192u,
                "encoder residue does not fit the 13-bit remainder field");
-_Static_assert(ROBOT_ENCODER_EDGES_TURN <= 4096u,
-               "total residue does not fit the 12-bit total_remainder field");
 #define MOTION_DUTY_MAX 1000
 #define MOTION_DUTY_MIN 350
 #define MOTION_DUTY_STEP 80
@@ -423,15 +421,6 @@ static void update_distance(motion_t * p_motion, int32_t left, int32_t right)
     /* The edge guard bounds this positive increment below 14000. */
     int32_t  moved    = (left_abs + right_abs) * MOTION_HALF_CIRCUM;
     uint32_t progress = (uint32_t)(moved / MOTION_EDGES);
-    /* Count wheel travel in both directions, retaining fractional micrometres.
-     * The unsigned numerator is bounded by the same encoder edge guard.
-     */
-    uint32_t total_numerator = (uint32_t)moved + p_motion->total_remainder;
-    uint32_t total =
-        p_motion->total_um + (total_numerator / ROBOT_ENCODER_EDGES_TURN);
-    p_motion->total_um = total % MOTION_POSITION_MOD_UM;
-    p_motion->total_remainder =
-        total_numerator % ROBOT_ENCODER_EDGES_TURN;
     progress += p_motion->progress_um;
     p_motion->progress_um = (progress > 4095999u) ? 4095999u : progress;
 }

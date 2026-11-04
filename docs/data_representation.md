@@ -124,7 +124,7 @@ and the units for biased fields are described below and in the headers.
 | motion / motion_t | `integral_right` | 0..32000 | 15 | unsigned bit-field |
 | motion / motion_t | `prior_left` | 0..2000 | 11 | unsigned bit-field |
 | motion / motion_t | `prior_right` | 0..2000 | 11 | unsigned bit-field |
-| motion / motion_t | `remainder` | 0..1918 | 11 | unsigned bit-field |
+| motion / motion_t | `remainder` | 0..4798 | 13 | unsigned bit-field |
 | motion / motion_t | `last_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | motion / motion_t | `last_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | physical_test / physical_test_t | `pause_until_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
@@ -185,6 +185,9 @@ and the units for biased fields are described below and in the headers.
 | navigation / navigation_t | `look` | 0..7 | 3 | unsigned bit-field |
 | navigation / navigation_t | `left_cm` | 0..511 | 9 | unsigned bit-field |
 | navigation / navigation_t | `right_cm` | 0..511 | 9 | unsigned bit-field |
+| navigation / navigation_t | `side_mm` | 0..4095 | 12 | unsigned bit-field |
+| navigation / navigation_t | `steps` | 0..31 | 5 | unsigned bit-field |
+| navigation / navigation_t | `b_margin` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `command` | 0..16777215 | 24 | explicit kind2 + distance12 + speed9 + reverse1; high8 zero |
 | obstacle / obstacle_t | `state` | 0..6 | 3 | unsigned bit-field |
 | obstacle / obstacle_t | `angle` | 0..60 | 6 | unsigned bit-field |
@@ -231,7 +234,7 @@ and the units for biased fields are described below and in the headers.
   signed mm/s +512. IMU failures saturate at three; retries and all
   state timers saturate or transition before their bit-field limit.
 * Distance state uses 0..4095999 micrometres (22 bits). The division
-  remainder -959..959 is stored with bias 959 (11 bits).
+  remainder -2399..2399 is stored with bias 2399 (13 bits).
 * Queue overflow never blocks control. Essential command/event overflow
   sets a fatal bit; routine telemetry replaces the oldest entry.
   ACK overflow drops the ACK only. Fatal causes remain in Safety's mask.

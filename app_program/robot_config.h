@@ -4,16 +4,29 @@
 #ifndef ROBOT_CONFIG_H
 #define ROBOT_CONFIG_H
 #if (OBSTACLE_TEST || LINE_TEST)
-#define ROBOT_CRUISE_MM_SECOND 150u /* Bench tests drive at 0.15 m/s. */
-#define ROBOT_CAUTIOUS_MM_SECOND 150u
+/* Bench tests: slow enough to watch, and the search gets time to finish. */
+#define ROBOT_CRUISE_MM_SECOND 100u
+#define ROBOT_CAUTIOUS_MM_SECOND 100u
+#define ROBOT_TURN_MM_SECOND 100u
+#define ROBOT_SEARCH_MS 5000u
 #else
 #define ROBOT_CRUISE_MM_SECOND 500u
 #define ROBOT_CAUTIOUS_MM_SECOND 250u
-#endif /* OBSTACLE_TEST || LINE_TEST */
 #define ROBOT_TURN_MM_SECOND 150u
+#define ROBOT_SEARCH_MS 3000u
+#endif /* OBSTACLE_TEST || LINE_TEST */
 #define ROBOT_WHEEL_CIRCUM_UM 204200u
-#define ROBOT_ENCODER_EDGES_TURN 960u
-#define ROBOT_TRACK_MM 280u
+/* Measured: one wheel turn is 2400 encoder edges. Host tests override this
+ * and the track with the reference values their expectations were written
+ * for (960 edges, 140 mm), so they test logic, not this robot's numbers. */
+#ifndef ROBOT_ENCODER_EDGES_TURN
+#define ROBOT_ENCODER_EDGES_TURN 2400u
+#endif /* ROBOT_ENCODER_EDGES_TURN */
+/* Estimated from the turn tests (a 280 setting gave 90 degrees with the old
+ * 960 scale, so 280 / 2.5 = 112). Replace with the measured wheel spacing. */
+#ifndef ROBOT_TRACK_MM
+#define ROBOT_TRACK_MM 112u
+#endif /* ROBOT_TRACK_MM */
 #define ROBOT_MOTOR_LEFT_SIGN 1
 #define ROBOT_MOTOR_RIGHT_SIGN 1
 #define ROBOT_ENCODER_LEFT_SIGN 1
@@ -27,14 +40,17 @@
 #define ROBOT_STALL_MS 200u
 #define ROBOT_SENSOR_AGE_MS 20u
 #define ROBOT_LINE_LOST_MS 150u
-#define ROBOT_SEARCH_MS 3000u
 #define ROBOT_SCAN_MS 5000u
 #define ROBOT_MANOEUVRE_MS 10000u
 #define ROBOT_WARNING_MM 600u
-#define ROBOT_OBSTACLE_MM 400u
+#define ROBOT_OBSTACLE_MM 300u
 #define ROBOT_CLEARANCE_MM 120u
-#define ROBOT_BYPASS_SIDE_MM 400u
-#define ROBOT_BYPASS_FORWARD_MM 1000u
+/* Sensor-guided bypass: move for STEP_MS, stop, check the obstacle, repeat.
+ * After the obstacle is clear, one margin move covers the robot's body. */
+#define ROBOT_BYPASS_STEP_MS 1000u
+#define ROBOT_BYPASS_SIDE_MARGIN_MM 150u
+#define ROBOT_BYPASS_FWD_MARGIN_MM 200u
+#define ROBOT_BYPASS_MAX_STEPS 15u
 #define ROBOT_RANGE_MAX_CM 400u
 #define ROBOT_IR_THRESHOLD 600u
 #define ROBOT_IMPACT_MG 2500

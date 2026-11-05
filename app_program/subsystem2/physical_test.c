@@ -20,7 +20,8 @@
 #define PHYSICAL_TEST_FAILED 9u
 #define PHYSICAL_TEST_PAUSE_MS 500u
 #define PHYSICAL_TEST_DISTANCE_MM 500u
-#define PHYSICAL_TEST_TURN_MM 120u
+/* Floor calibration: 103 mm produced 95 deg; 103 * 90 / 95 = 98 mm. */
+#define PHYSICAL_TEST_TURN_MM 98u
 #define PHYSICAL_TEST_SPEED 250u
 #define PHYSICAL_TEST_START 1u
 #define PHYSICAL_TEST_ESTOP 2u

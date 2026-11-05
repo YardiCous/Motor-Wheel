@@ -19,6 +19,7 @@
 #include "subsystem2/encoder_test.h"
 #endif /* ENCODER_TEST */
 #include "subsystem3/line.h"
+#include "subsystem4/drv_lsm303.h"
 #include "subsystem4/safety.h"
 #include "subsystem4/terrain.h"
 #include "subsystem5/navigation.h"
@@ -144,7 +145,8 @@ static void bench_init(bench_t * p_bench);
 static void bench_step(navigation_t * p_navigation, bench_t * p_bench);
 #endif /* OBSTACLE_TEST */
 #if ((!OBSTACLE_TEST) && (!LINE_TEST))
-static void terrain_cycle(terrain_t * p_terrain, bool * pb_configured);
+static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
+                          bool * pb_configured);
 #else
 static void terrain_stub(void);
 #endif /* OBSTACLE_TEST || LINE_TEST */
@@ -546,13 +548,14 @@ static void terrain_task(INT start, void * p_argument)
     }
 #else
     terrain_t detector = {0};
+    drv_lsm303_t imu = {0};
     terrain_init(&detector);
     bool b_configured = false;
 
     for (;;)
     {
         wait_release();
-        terrain_cycle(&detector, &b_configured);
+        terrain_cycle(&detector, &imu, &b_configured);
     }
 #endif /* OBSTACLE_TEST || LINE_TEST */
 }
@@ -837,7 +840,8 @@ static void line_cycle(line_t * p_line)
 /** @brief Failed or aged data invalidates height instead of inventing a
  * sample.
  */
-static void terrain_cycle(terrain_t * p_terrain, bool * pb_configured)
+static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
+                          bool * pb_configured)
 {
     uint32_t mask        = board_io_lock();
     bool     b_reset     = g_shared.b_reset_imu;
@@ -851,44 +855,48 @@ static void terrain_cycle(terrain_t * p_terrain, bool * pb_configured)
         *pb_configured = false;
     }
 
-    if (!*pb_configured)
+    if ((!*pb_configured) || (p_terrain->b_request_init))
     {
-        *pb_configured = board_io_imu_init();
+        *pb_configured = drv_lsm303_init(p_imu);
     }
 
-    int16_t accel_x = 0;
-    int16_t accel_y = 0;
-    int16_t accel_z = 0;
-    bool    b_read =
-        (*pb_configured) && (board_io_imu(&accel_x, &accel_y, &accel_z));
-    bool     b_fresh  = b_read && ((board_io_time_ms() - motion_time) <= 20u);
+    terrain_input_t input = {0};
+    input.b_imu_ok =
+        (*pb_configured) && (drv_lsm303_accel(p_imu, NULL, input.accel_mg));
+    input.b_motion_fresh = (board_io_time_ms() - motion_time) <= 20u;
     uint32_t snapshot = field_read(5u, 32u);
     /* The nine-bit speed has maximum magnitude 511. */
     int16_t speed = (int16_t)((snapshot >> 12u) & 511u);
     speed         = (0u != (snapshot & (1u << 21u))) ? -speed : speed;
-    terrain_step(p_terrain, accel_x, accel_y, accel_z, speed, snapshot & 4095u,
-                 b_fresh);
+    input.speed_mm_s = speed;
+    input.distance_mm = snapshot & 4095u;
+    input.left_mm_s =
+        (int16_t)data_formats_unsign(field_read(203u, 10u), 10u);
+    input.right_mm_s =
+        (int16_t)data_formats_unsign(field_read(213u, 10u), 10u);
+    terrain_step(p_terrain, &input);
     uint16_t faults =
         (p_terrain->failures >= 3u) ? DATA_FORMATS_FAULT_IMU : 0u;
     faults |= p_terrain->b_impact ? DATA_FORMATS_FAULT_IMPACT : 0u;
-    faults |= p_terrain->b_overflow ? DATA_FORMATS_FAULT_RANGE : 0u;
     fault_source(ROBOT_SOURCE_IMU, faults);
     field_write(85u, 3u, p_terrain->state);
-    field_write(88u, 7u, p_terrain->pitch);
-    field_write(95u, 8u, p_terrain->peak_mm);
+    field_write(88u, 7u, p_terrain->pitch_field);
+    field_write(95u, 8u, p_terrain->run_peak_mm);
     field_write(137u, 1u, p_terrain->b_on_hump);
-    field_write(138u, 1u, p_terrain->b_valid);
+    field_write(138u, 1u, p_terrain->b_peak_valid);
     mask                 = board_io_lock();
-    g_shared.b_imu_ready = (p_terrain->samples >= ROBOT_IMU_CAL_SAMPLES) &&
-                           (p_terrain->failures < 3u);
+    g_shared.b_imu_ready = terrain_ready(p_terrain);
     board_io_unlock(mask);
 
     if ((p_terrain->b_started) || (p_terrain->b_finished))
     {
         uint8_t event[2] = {0u};
         (void)data_formats_write(event, 0u, 1u, p_terrain->b_finished);
-        (void)data_formats_write(event, 1u, 8u, p_terrain->peak_mm);
-        (void)data_formats_write(event, 9u, 1u, p_terrain->b_valid);
+        uint32_t peak = p_terrain->b_finished
+                            ? p_terrain->hump_peak_mm
+                            : terrain_peak_mm(p_terrain->peak_cmm);
+        (void)data_formats_write(event, 1u, 8u, peak);
+        (void)data_formats_write(event, 9u, 1u, p_terrain->b_hump_valid);
         ER result = tk_snd_mbf(gh_imu_queue, event, 2, TMO_POL);
         mask      = board_io_lock();
         g_shared.b_queue_fault =
@@ -896,7 +904,6 @@ static void terrain_cycle(terrain_t * p_terrain, bool * pb_configured)
         board_io_unlock(mask);
     }
 
-    *pb_configured = b_read;
     heartbeat(2u);
 
     if (0u != faults)

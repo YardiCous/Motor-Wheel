@@ -40,6 +40,7 @@ typedef struct
     uint32_t remainder : 13;
     int16_t  pwm_left;
     int16_t  pwm_right;
+    int16_t  straight_error_edges;
 } motion_t;
 
 /** @brief Reset while stopped, anchoring both encoder snapshots. */

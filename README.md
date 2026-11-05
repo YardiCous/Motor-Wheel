@@ -46,14 +46,24 @@ WiFi connection failure does not prevent offline startup or local controls.
 
 ### Physical motor test
 
+The command above produces
+`build_make/mtk3pico_smp1_usb_cdc_motortest.uf2`.
+
 Build with `MOTOR_TEST=1` only for a bench test. The resulting image keeps the
 motors off until the local START switch is pressed, then runs a
-200-mm forward move, stop, 200-mm reverse move, stop, left turn, stop, right
-turn, and stop. Each movement is encoder-controlled at 150 mm/s and stops
+500-mm forward move, stop, 500-mm reverse move, stop, left turn, stop, right
+turn, and stop. Each movement is encoder-controlled at 250 mm/s and stops
 after the target encoder distance. It prints phase messages on the USB console
 and stops on an encoder stall or the active-low E-stop on GP21. Keep the wheels
 lifted for the first run, release START before boot, and keep the E-stop
 accessible. RESET on GP22 returns the test to its armed, motor-off state.
+
+The left and right turns target 90 degrees using 98 mm of wheel travel,
+scaled from the measured 95 degrees at 103 mm. Straight moves balance
+cumulative encoder travel with a small leftward trim: right wheel +0.5%,
+left wheel -0.5%, to compensate for the remaining right drift. Confirm the
+angle and straight tracking on the floor after flashing; slip and unequal
+wheel diameters still require physical calibration.
 
 This mode is intentionally separate from the normal autonomous firmware and
 must not be used while the robot is on a course. A successful console sequence

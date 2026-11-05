@@ -21,12 +21,12 @@
  * for (960 edges, 140 mm), so they test logic, not this robot's numbers. */
 #ifndef ROBOT_ENCODER_EDGES_TURN
 #define ROBOT_ENCODER_EDGES_TURN 2400u
+#endif /* ROBOT_ENCODER_EDGES_TURN */
 
 /* Per-sensor black thresholds; each sensor reads white differently. */
 #define ROBOT_IR_THRESHOLD_LEFT 450u
 #define ROBOT_IR_THRESHOLD_CENTRE 300u
 #define ROBOT_IR_THRESHOLD_RIGHT ROBOT_IR_THRESHOLD
-#endif /* ROBOT_ENCODER_EDGES_TURN */
 /* Estimated from the turn tests (a 280 setting gave 90 degrees with the old
  * 960 scale, so 280 / 2.5 = 112). Replace with the measured wheel spacing. */
 #ifndef ROBOT_TRACK_MM
@@ -34,6 +34,13 @@
 #endif /* ROBOT_TRACK_MM */
 #define ROBOT_MOTOR_LEFT_SIGN 1
 #define ROBOT_MOTOR_RIGHT_SIGN 1
+/* Straight moves: correct 3 mm/s per mm of wheel-distance mismatch,
+ * capped at 40 mm/s and half the commanded speed. */
+#define ROBOT_STRAIGHT_GAIN 3
+#define ROBOT_STRAIGHT_CORRECTION_MAX 40
+/* Residual right drift: right wheel +0.5%, left -0.5% on straight moves.
+ * Positive values bias left; zero requests equal encoder travel. */
+#define ROBOT_STRAIGHT_TRIM_PERMILLE 5
 #define ROBOT_ENCODER_LEFT_SIGN 1
 #define ROBOT_ENCODER_RIGHT_SIGN 1
 #define ROBOT_LINE_PERIOD_MS 5u

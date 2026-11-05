@@ -29,7 +29,7 @@
 #define VERIFY_BARCODE_SYMBOLS 4u
 #define VERIFY_LINE_CALIBRATION 32u
 #define VERIFY_LOST_SAMPLES 31u
-#define VERIFY_SCAN_POINTS 8u
+#define VERIFY_SCAN_POINTS OBSTACLE_SCAN_POINTS
 #define VERIFY_BYPASS_CYCLES 3000u
 #define VERIFY_CONFIRMATIONS 3u
 #define VERIFY_FIRST_SAMPLE 1u
@@ -41,6 +41,19 @@ static void verify_safety(void);
 static void verify_line(void);
 static void verify_bad_barcode(void);
 static void verify_obstacle(void);
+static void verify_range_restart(void);
+static void verify_width_route(void);
+static void verify_retry_route(void);
+static void verify_body_fallback(void);
+static void verify_body_interrupts(void);
+static void verify_body_rejections(void);
+static void body_sweep(navigation_t * p_manager, const uint16_t * p_ranges);
+static void verify_long_side_move(navigation_t * p_manager);
+static void retry_tick(navigation_t * p_manager, bool b_done,
+                        uint16_t range_cm);
+static void verify_scan_edges(void);
+static void verify_blocked_width_route(void);
+static void verify_settle(navigation_t * p_manager);
 static void verify_navigation(void);
 static void verify_bypass_run(navigation_t * p_manager, bool b_clears);
 static void verify_fragments(void);
@@ -52,6 +65,14 @@ static void motion_ticks(motion_t * p_motion, uint32_t ticks,
 /** @brief Assertions report the first reproducible violated contract. */
 int main(void)
 {
+#if OBSTACLE_TEST
+    verify_body_fallback();
+    verify_body_interrupts();
+    verify_body_rejections();
+    verify_retry_route();
+    (void)puts("PASS: 70-mm/s body scan, bounded lateral legs and retries");
+    return 0;
+#endif /* OBSTACLE_TEST */
     verify_fields();
     verify_vector();
     verify_motion();
@@ -61,6 +82,14 @@ int main(void)
     verify_line();
     verify_bad_barcode();
     verify_obstacle();
+    verify_range_restart();
+    verify_width_route();
+    verify_retry_route();
+    verify_body_fallback();
+    verify_body_interrupts();
+    verify_body_rejections();
+    verify_scan_edges();
+    verify_blocked_width_route();
     verify_navigation();
     verify_fragments();
     verify_interlocks();
@@ -325,16 +354,31 @@ static void verify_obstacle(void)
     obstacle_init(&scanner);
     assert(obstacle_scan(&scanner));
     assert(!obstacle_scan(&scanner));
-    uint16_t samples[8] = {120u, 100u, 30u, 90u, 80u, 110u, 120u, 100u};
-
     for (uint8_t index = 0u; index < VERIFY_SCAN_POINTS; ++index)
     {
-        obstacle_sample(&scanner, samples[index], true);
+        uint16_t range = ((index >= 6u) && (index <= 14u)) ? 31u : 120u;
+        range = (10u == index) ? 30u : range;
+        range = (0u == index) ? 400u : range;
+        obstacle_sample(&scanner, range, true);
     }
 
     assert(OBSTACLE_PLAN == scanner.state);
     assert(0u != scanner.b_left);
     assert(0u != scanner.b_ready);
+    assert(162u == scanner.width_mm);
+    assert(400u == scanner.left_cm);
+    assert(120u == scanner.right_cm);
+    obstacle_init(&scanner);
+    assert(obstacle_scan(&scanner));
+
+    for (uint8_t index = 0u; index < VERIFY_SCAN_POINTS; ++index)
+    {
+        obstacle_sample(&scanner, (20u == index) ? 32u : 30u, true);
+    }
+
+    assert(OBSTACLE_BODY_SCAN == scanner.state);
+    assert(OBSTACLE_REASON_WIDER_SCAN == scanner.reason);
+    assert(!scanner.b_ready);
     assert(100u == obstacle_median(400u, 100u, 2u));
     obstacle_init(&scanner);
     assert(obstacle_scan(&scanner));
@@ -344,8 +388,431 @@ static void verify_obstacle(void)
     assert(OBSTACLE_ABORT == scanner.state);
     obstacle_init(&scanner);
     assert(obstacle_scan(&scanner));
-    obstacle_tick(&scanner, 5000u);
+    obstacle_tick(&scanner, ROBOT_SCAN_MS);
     assert(OBSTACLE_ABORT == scanner.state);
+}
+
+/** @brief Asymmetric edges and right-hand clearance produce a right plan. */
+static void verify_scan_edges(void)
+{
+    obstacle_t scanner = {0};
+    obstacle_init(&scanner);
+    assert(obstacle_scan(&scanner));
+
+    for (uint8_t index = 0u; index < VERIFY_SCAN_POINTS; ++index)
+    {
+        uint16_t range = ((index >= 7u) && (index <= 16u)) ? 31u : 80u;
+        range = (10u == index) ? 30u : range;
+        range = (20u == index) ? 400u : range;
+        obstacle_sample(&scanner, range, true);
+    }
+
+    assert(OBSTACLE_PLAN == scanner.state);
+    assert(180u == scanner.width_mm);
+    assert(!scanner.b_left);
+    assert(80u == scanner.left_cm);
+    assert(400u == scanner.right_cm);
+    obstacle_init(&scanner);
+    assert(obstacle_scan(&scanner));
+
+    for (uint8_t index = 0u; index < VERIFY_SCAN_POINTS; ++index)
+    {
+        obstacle_sample(&scanner, 400u, true);
+    }
+
+    assert(OBSTACLE_ABORT == scanner.state);
+    assert(!scanner.b_ready);
+}
+
+/** @brief A newly seen side obstruction prevents the lateral move. */
+static void verify_blocked_width_route(void)
+{
+    navigation_t manager = {0};
+    navigation_init(&manager);
+    assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
+    navigation_step(&manager, MOTION_FOLLOW, false, true, false, false,
+                    25u, true, false, false, false, false);
+    assert(navigation_obstacle_plan(&manager, 162u, 400u, 120u));
+    navigation_step(&manager, MOTION_IDLE, false, false, false, false,
+                    400u, true, true, true, false, false);
+    navigation_step(&manager, MOTION_IDLE, true, false, false, false,
+                    20u, true, false, false, false, false);
+
+    for (uint8_t tick = 0u; tick < 40u; ++tick)
+    {
+        navigation_step(&manager, MOTION_IDLE, false, false, false, false,
+                        20u, true, false, false, false, false);
+    }
+
+    assert(manager.b_fault);
+    assert(manager.b_stop_requested);
+    assert(MOTION_TURN == (manager.command & 3u));
+}
+
+/** @brief Out-of-range batches survive scan reset and allow a fresh START. */
+static void verify_range_restart(void)
+{
+    const uint16_t empty[3] = {0u, 0u, 0u};
+    const uint16_t echoes[3] = {90u, 25u, 60u};
+    assert(ROBOT_RANGE_MAX_CM == obstacle_range(empty, 0u));
+    assert(90u == obstacle_range(echoes, 1u));
+    assert(25u == obstacle_range(echoes, 2u));
+    assert(60u == obstacle_range(echoes, 3u));
+    const uint16_t short_echoes[3] = {1u, 1u, 1u};
+    assert(1u == obstacle_range(short_echoes, 3u));
+
+    obstacle_t scanner = {0};
+    navigation_t manager = {0};
+    obstacle_init(&scanner);
+    navigation_init(&manager);
+
+    for (uint8_t attempt = 0u; attempt < 2u; ++attempt)
+    {
+        uint16_t range = obstacle_range(empty, 0u);
+        obstacle_sample(&scanner, range, true);
+        assert(ROBOT_RANGE_MAX_CM == scanner.range_cm);
+        assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
+        navigation_step(&manager, MOTION_IDLE, false, true, false, false,
+                        range, true, false, false, false, false);
+        assert(DATA_FORMATS_FOLLOW == manager.state);
+        assert(!manager.b_fault);
+
+        /* A real near echo must still stop following and request a scan. */
+        range = obstacle_range(echoes, 2u);
+        navigation_step(&manager, MOTION_FOLLOW, false, true, false, false,
+                        range, true, false, false, false, false);
+        assert(DATA_FORMATS_AVOID == manager.state);
+        assert(manager.b_stop_requested);
+        assert(!manager.b_command_ready);
+        assert(manager.b_scan_requested);
+        assert(obstacle_scan(&scanner));
+        obstacle_init(&scanner);
+        assert(30u == scanner.angle);
+        assert(OBSTACLE_IDLE == scanner.state);
+        assert(navigation_supervise(&manager, DATA_FORMATS_STOP, false));
+        assert(navigation_supervise(&manager, DATA_FORMATS_RESET, false));
+        navigation_init(&manager);
+    }
+}
+
+/** @brief Left and right routes use full width then the saved front range. */
+static void verify_width_route(void)
+{
+    for (uint8_t side = 0u; side < 2u; ++side)
+    {
+        bool b_left = (0u == side);
+        navigation_t manager = {0};
+        navigation_init(&manager);
+        assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
+        navigation_step(&manager, MOTION_FOLLOW, false, true, false, false,
+                        25u, true, false, false, false, false);
+        assert(250u == manager.detected_mm);
+
+        for (uint16_t tick = 0u; tick < 600u; ++tick)
+        {
+            navigation_step(&manager, MOTION_IDLE, false, false, false,
+                            false, 400u, true, false, false, false, false);
+            assert(!manager.b_command_ready);
+            assert(!manager.b_fault);
+        }
+
+        assert(!navigation_obstacle_plan(&manager, 0u, 400u, 400u));
+        assert(!navigation_obstacle_plan(&manager, 4000u, 400u, 400u));
+        assert(!navigation_obstacle_plan(&manager, 162u, 20u, 20u));
+        assert(navigation_obstacle_plan(&manager, 162u,
+                                        b_left ? 400u : 120u,
+                                        b_left ? 120u : 400u));
+        navigation_step(&manager, MOTION_IDLE, false, false, false, false,
+                        100u, true, true, b_left, false, false);
+        uint32_t turn = manager.command;
+        uint32_t quarter = ROBOT_QUARTER_TURN_MM;
+        assert(MOTION_TURN == (turn & 3u));
+        assert(quarter == ((turn >> 2u) & 4095u));
+        assert(b_left == (0u != (turn >> 23u)));
+        navigation_step(&manager, MOTION_IDLE, true, false, false, false,
+                        100u, true, false, false, false, false);
+        verify_settle(&manager);
+        assert(MOTION_MOVE == (manager.command & 3u));
+        assert(312u == ((manager.command >> 2u) & 4095u));
+        navigation_step(&manager, MOTION_IDLE, true, false, false, false,
+                        100u, true, false, false, false, false);
+        assert(MOTION_TURN == (manager.command & 3u));
+        assert(quarter == ((manager.command >> 2u) & 4095u));
+        assert(b_left != (0u != (manager.command >> 23u)));
+        navigation_step(&manager, MOTION_IDLE, true, false, false, false,
+                        100u, true, false, false, false, false);
+        verify_settle(&manager);
+        assert(MOTION_MOVE == (manager.command & 3u));
+        assert(250u == ((manager.command >> 2u) & 4095u));
+        assert(!manager.b_fault);
+    }
+}
+
+/** @brief Emulate turn duration, actual heading, and settled body readings. */
+static void body_sweep(navigation_t * p_manager, const uint16_t * p_ranges)
+{
+    int32_t heading = 0;
+    int32_t turn = 0;
+    uint32_t ticks = 0u;
+    uint32_t turns = 0u;
+
+    for (uint32_t tick = 0u;
+         (tick < 3000u) && (0u == p_manager->stage) && (!p_manager->b_fault);
+         ++tick)
+    {
+        bool b_done = false;
+        if (ticks > 0u)
+        {
+            --ticks;
+            if (0u == ticks)
+            {
+                heading += turn;
+                b_done = true;
+            }
+        }
+
+        uint16_t range = 400u;
+        if (2u == p_manager->look)
+        {
+            int32_t target = (int32_t)((p_manager->body_index *
+                                       ROBOT_QUARTER_TURN_MM) / 6u);
+            target -= (int32_t)ROBOT_QUARTER_TURN_MM;
+            assert(target == heading);
+            range = p_ranges[p_manager->body_index];
+        }
+
+        p_manager->b_command_ready = false;
+        navigation_step(p_manager, MOTION_IDLE, b_done, false, false, false,
+                        range, true, false, false, false, false);
+        if ((p_manager->b_command_ready) && (0u == p_manager->stage))
+        {
+            assert(0u == ticks);
+            assert(MOTION_TURN == (p_manager->command & 3u));
+            uint32_t distance = (p_manager->command >> 2u) & 4095u;
+            turn = (int32_t)distance;
+            turn = (0u != (p_manager->command >> 23u)) ? -turn : turn;
+            ticks = ((distance * 100u) + ROBOT_TURN_MM_SECOND - 1u) /
+                    ROBOT_TURN_MM_SECOND;
+            ++turns;
+        }
+    }
+
+    assert(0 == heading);
+    assert(14u == turns);
+}
+
+/** @brief Large estimated widths split into bounded, checked lateral legs. */
+static void verify_long_side_move(navigation_t * p_manager)
+{
+    uint32_t total = p_manager->side_mm;
+    uint32_t moved = 0u;
+    navigation_step(p_manager, MOTION_IDLE, true, false, false, false,
+                    400u, true, false, false, false, false);
+
+    while (2u == p_manager->stage)
+    {
+        verify_settle(p_manager);
+        assert(!p_manager->b_fault);
+        assert(MOTION_MOVE == (p_manager->command & 3u));
+        uint32_t distance = (p_manager->command >> 2u) & 4095u;
+        assert(distance <= ((ROBOT_TURN_MM_SECOND * 8000u) / 1000u));
+        assert(distance > 0u);
+        moved += distance;
+        navigation_step(p_manager, MOTION_IDLE, true, false, false, false,
+                        400u, true, false, false, false, false);
+    }
+
+    assert(total == moved);
+    assert(total == p_manager->side_mm);
+    assert(0u == p_manager->side_remaining_mm);
+    assert(3u == p_manager->stage);
+}
+
+/** @brief Reproduce the flat 30-cm scan, then recover with wider body rays. */
+static void verify_body_fallback(void)
+{
+    const uint16_t wide[13] = {
+        400u, 400u, 60u, 42u, 35u, 31u, 30u,
+        31u, 35u, 42u, 60u, 400u, 350u};
+    assert(2240u == obstacle_body_width(wide));
+    navigation_t manager = {0};
+    navigation_init(&manager);
+    assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
+    navigation_step(&manager, MOTION_FOLLOW, false, true, false, false,
+                    30u, true, false, false, false, false);
+    assert(navigation_body_scan(&manager));
+    assert(!navigation_body_scan(&manager));
+    body_sweep(&manager, wide);
+    assert(!manager.b_fault);
+    assert(1u == manager.stage);
+    assert(manager.b_left);
+    assert(2240u == manager.width_mm);
+    assert(2390u == manager.side_mm);
+    assert(300u == manager.detected_mm);
+    verify_long_side_move(&manager);
+
+    uint16_t mirrored[13] = {0u};
+    for (uint8_t index = 0u; index < 13u; ++index)
+    {
+        mirrored[index] = wide[12u - index];
+    }
+
+    navigation_init(&manager);
+    manager.state = DATA_FORMATS_AVOID;
+    manager.detected_mm = 300u;
+    assert(navigation_body_scan(&manager));
+    body_sweep(&manager, mirrored);
+    assert(!manager.b_fault);
+    assert(!manager.b_left);
+    assert(0u == (manager.command >> 23u));
+    verify_long_side_move(&manager);
+    mirrored[3] = 0u;
+    assert(0u == obstacle_body_width(mirrored));
+
+    uint16_t flat[13] = {0u};
+    for (uint8_t index = 0u; index < 13u; ++index)
+    {
+        flat[index] = 30u;
+    }
+
+    assert(0u == obstacle_body_width(flat));
+    navigation_init(&manager);
+    manager.state = DATA_FORMATS_AVOID;
+    assert(navigation_body_scan(&manager));
+    body_sweep(&manager, flat);
+    assert(manager.b_fault);
+    assert(manager.b_stop_requested);
+    assert(OBSTACLE_REASON_NO_EDGES == manager.scan_failure);
+    assert(0u == manager.side_mm);
+}
+
+/** @brief STOP and safety preempt a body sweep without replaying commands. */
+static void verify_body_interrupts(void)
+{
+    navigation_t manager = {0};
+    navigation_init(&manager);
+    manager.state = DATA_FORMATS_AVOID;
+    assert(navigation_body_scan(&manager));
+    navigation_step(&manager, MOTION_IDLE, false, false, false, false,
+                    400u, true, false, false, false, false);
+    assert(manager.b_command_ready);
+    assert(navigation_supervise(&manager, DATA_FORMATS_STOP, false));
+    navigation_step(&manager, MOTION_IDLE, true, false, false, false,
+                    400u, true, false, false, false, false);
+    assert(DATA_FORMATS_IDLE == manager.state);
+    assert(!manager.b_command_ready);
+    assert(manager.b_stop_requested);
+    manager.state = DATA_FORMATS_AVOID;
+    manager.b_command_ready = true;
+    navigation_step(&manager, MOTION_TURN, false, false, false, false,
+                    400u, true, false, false, false, true);
+    assert(DATA_FORMATS_FAULT == manager.state);
+    assert(!manager.b_command_ready);
+    assert(manager.b_stop_requested);
+}
+
+/** @brief Body fallback must not invent a route when side space is blocked. */
+static void verify_body_rejections(void)
+{
+    uint16_t blocked[13] = {
+        100u, 400u, 60u, 42u, 35u, 31u, 30u,
+        31u, 35u, 42u, 60u, 400u, 100u};
+    navigation_t manager = {0};
+    navigation_init(&manager);
+    manager.state = DATA_FORMATS_AVOID;
+    assert(navigation_body_scan(&manager));
+    body_sweep(&manager, blocked);
+    assert(manager.b_fault);
+    assert(OBSTACLE_REASON_BLOCKED == manager.scan_failure);
+    assert(0u == manager.side_mm);
+    navigation_step(&manager, MOTION_IDLE, false, false, false, false,
+                    400u, true, false, false, false, true);
+    assert(navigation_supervise(&manager, DATA_FORMATS_RESET, true));
+    assert(manager.b_reset_requested);
+    navigation_init(&manager);
+    assert(!manager.b_body_scan);
+    assert(0u == manager.width_mm);
+    blocked[6] = 400u;
+    manager.state = DATA_FORMATS_AVOID;
+    assert(navigation_body_scan(&manager));
+    body_sweep(&manager, blocked);
+    assert(manager.b_fault);
+    assert(OBSTACLE_REASON_NO_FRONT == manager.scan_failure);
+    assert(0u == manager.side_mm);
+}
+
+/** @brief Mimic dispatch consuming each command between navigation ticks. */
+static void retry_tick(navigation_t * p_manager, bool b_done,
+                        uint16_t range_cm)
+{
+    p_manager->b_command_ready = false;
+    navigation_step(p_manager, MOTION_IDLE, b_done, false, false, false,
+                    range_cm, true, false, false, false, false);
+}
+
+/** @brief Both directions repeat quarter-turn, fixed move, quarter-turn. */
+static void verify_retry_route(void)
+{
+    for (uint8_t side = 0u; side < 2u; ++side)
+    {
+        navigation_t manager = {0};
+        navigation_init(&manager);
+        manager.state = DATA_FORMATS_AVOID;
+        manager.stage = 6u;
+        manager.side_mm = 312u;
+        manager.b_left = (0u == side);
+        manager.b_waiting = true;
+
+        for (uint8_t retry = 0u; retry < 3u; ++retry)
+        {
+            retry_tick(&manager, true, 400u);
+            assert(MOTION_TURN == (manager.command & 3u));
+            assert(ROBOT_QUARTER_TURN_MM ==
+                   ((manager.command >> 2u) & 4095u));
+            assert(manager.b_left != (0u != (manager.command >> 23u)));
+            retry_tick(&manager, true, 15u);
+
+            for (uint8_t tick = 0u; tick < 40u; ++tick)
+            {
+                retry_tick(&manager, false, 15u);
+            }
+
+            assert((retry + 1u) == manager.steps);
+            assert(!manager.b_margin);
+            retry_tick(&manager, false, 15u);
+            assert(MOTION_TURN == (manager.command & 3u));
+            assert(ROBOT_QUARTER_TURN_MM ==
+                   ((manager.command >> 2u) & 4095u));
+            assert(manager.b_left == (0u != (manager.command >> 23u)));
+            retry_tick(&manager, true, 15u);
+
+            for (uint8_t tick = 0u; tick < 39u; ++tick)
+            {
+                retry_tick(&manager, false, 15u);
+                assert(!manager.b_command_ready);
+                assert(!manager.b_fault);
+            }
+
+            retry_tick(&manager, false, 400u);
+            assert(manager.b_command_ready);
+            assert(MOTION_MOVE == (manager.command & 3u));
+            assert(((ROBOT_TURN_MM_SECOND * ROBOT_BYPASS_STEP_MS) / 1000u) ==
+                   ((manager.command >> 2u) & 4095u));
+            assert(!manager.b_fault);
+            /* A blocked recheck must cancel a previously requested margin. */
+            manager.b_margin = true;
+        }
+    }
+}
+
+/** @brief Supply fresh clear readings while the body settles after a turn. */
+static void verify_settle(navigation_t * p_manager)
+{
+    for (uint8_t tick = 0u; tick < 40u; ++tick)
+    {
+        navigation_step(p_manager, MOTION_IDLE, false, false, false, false,
+                        400u, true, false, false, false, false);
+    }
 }
 
 /** @brief Barcode, obstacle bypass, recovery and safety arbitration interact.
@@ -367,6 +834,7 @@ static void verify_navigation(void)
                     true, false, false, false, false);
     assert(DATA_FORMATS_AVOID == manager.state);
     assert(0u != manager.b_stop_requested);
+    assert(navigation_obstacle_plan(&manager, 162u, 400u, 120u));
     navigation_step(&manager, MOTION_IDLE, false, false, false, false, 100u,
                     true, true, true, false, false);
     assert(1u == manager.stage);
@@ -446,6 +914,7 @@ static void verify_interlocks(void)
     assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
     navigation_step(&manager, MOTION_FOLLOW, false, true, false, false, 25u,
                     true, false, false, false, false);
+    assert(navigation_obstacle_plan(&manager, 162u, 120u, 400u));
     navigation_step(&manager, MOTION_IDLE, false, false, false, false, 100u,
                     true, true, false, false, false);
     verify_bypass_run(&manager, false);
@@ -465,8 +934,8 @@ static void verify_bypass_run(navigation_t * p_manager, bool b_clears)
     {
         bool     b_side  = (p_manager->stage < 6u);
         bool     b_there = (!b_clears) || (p_manager->steps < 2u);
-        uint16_t range   = b_side ? 100u : 200u;
-        range            = b_there ? (b_side ? 30u : 15u) : range;
+        uint16_t range   = b_side ? 400u : 200u;
+        range = ((8u == p_manager->stage) && b_there) ? 15u : range;
         navigation_step(p_manager, MOTION_IDLE, p_manager->b_waiting, false,
                         false, false, range, true, false, true, false, false);
     }

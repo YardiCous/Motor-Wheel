@@ -11,6 +11,22 @@ or real-time deadlines. Follow [the physical validation plan](../docs/validation
 and put measurements/video links in the existing subsystem/integration logs.
 The original empty test logs are retained as places for the team to record results.
 
+Navigation regression checks cover both bypass directions, asymmetric edge
+widths, missing edges, all-empty scans, blocked routes, calibrated quarter
+turns, full-width sideways travel, and the saved detection distance.
+
+Body-scan regression checks replay the flat 30-cm servo scan, verify a full
+left-to-right body sweep and return to the original heading, select both
+bypass directions, split large offsets, and reject unbounded widths. STOP
+and safety preemption are checked. The same body sweep and retry checks run
+at both normal and 70-mm/s obstacle-test speeds with sanitizers enabled.
+
+The host runner also compiles the real `board_io.c` against mocked registers.
+It checks ultrasonic trigger completion without a timer ISR, echo distances,
+missing echoes, reset during an incomplete echo, preserved encoder state,
+and microsecond timer wraparound. These checks do not replace a physical
+sensor test.
+
 For a direct bench check of the real motors, build and flash the opt-in
 sequence with `MOTOR_TEST=1`:
 

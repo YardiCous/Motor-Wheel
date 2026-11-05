@@ -7,6 +7,20 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/** @brief Echo capture and GPIO evidence for the most recent ping. */
+typedef struct
+{
+    uint32_t width_us;
+    uint32_t rises;
+    uint32_t falls;
+    uint32_t gpio_control;
+    uint32_t gpio_pad;
+    uint32_t irq_raw;
+    uint32_t irq_enabled;
+    uint8_t state;
+    uint8_t pins;
+} board_io_range_diag_t;
+
 /** @brief Configure safe outputs and install T-Kernel-wrapped ISRs on core 0.
  */
 bool board_io_init(int32_t h_echo_flag);
@@ -40,10 +54,14 @@ bool board_io_i2c_read(uint8_t address, uint8_t reg, uint8_t * p_bytes,
 bool board_io_i2c_write(uint8_t address, uint8_t reg, uint8_t value);
 /** @brief Set a servo angle 0..60 in three-degree units. */
 void board_io_servo(uint8_t angle);
-/** @brief Trigger a 10-us pulse using TIMER alarm 3, without busy waiting. */
+/** @brief Reinitialise ranging GPIO and capture without resetting encoders. */
+void board_io_range_reset(void);
+/** @brief Drive a 12-us trigger pulse with both edges in a critical section. */
 void board_io_ping(void);
-/** @brief Retrieve the ISR-captured echo; an absent echo is invalid. */
+/** @brief Read captured range; 1 cm means below range, no echo is invalid. */
 bool board_io_range(uint16_t * p_cm);
+/** @brief Snapshot echo capture and physical pin configuration atomically. */
+void board_io_range_diagnostics(board_io_range_diag_t * p_diag);
 /** @brief Read active-low local START, STOP, RESET as three individual bits.
  */
 uint8_t board_io_buttons(void);

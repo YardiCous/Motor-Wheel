@@ -13,7 +13,21 @@ Retain the kernel-required legacy symbol name and signature.
 
 `bool board_io_init(int32_t h_echo_flag);`
 
-Configure safe outputs and install T-Kernel-wrapped ISRs on core 0.
+Echo capture and GPIO evidence for the most recent ping. */
+typedef struct
+{
+    uint32_t width_us;
+    uint32_t rises;
+    uint32_t falls;
+    uint32_t gpio_control;
+    uint32_t gpio_pad;
+    uint32_t irq_raw;
+    uint32_t irq_enabled;
+    uint8_t state;
+    uint8_t pins;
+} board_io_range_diag_t;
+
+/** @brief Configure safe outputs and install T-Kernel-wrapped ISRs on core 0.
 
 `uint32_t board_io_lock(void);`
 
@@ -67,13 +81,21 @@ Write one register on a 7-bit I2C1 target.
 
 Set a servo angle 0..60 in three-degree units.
 
+`void board_io_range_reset(void);`
+
+Reinitialise ranging GPIO and capture without resetting encoders.
+
 `void board_io_ping(void);`
 
-Trigger a 10-us pulse using TIMER alarm 3, without busy waiting.
+Drive a 12-us trigger pulse with both edges in a critical section.
 
 `bool board_io_range(uint16_t * p_cm);`
 
-Retrieve the ISR-captured echo; an absent echo is invalid.
+Read captured range; 1 cm means below range, no echo is invalid.
+
+`void board_io_range_diagnostics(board_io_range_diag_t * p_diag);`
+
+Snapshot echo capture and physical pin configuration atomically.
 
 `uint8_t board_io_buttons(void);`
 
@@ -526,6 +548,14 @@ typedef struct
     uint32_t side_mm : 12;
     uint32_t steps : 5;
     bool     b_margin : 1;
+    uint32_t width_mm : 12;
+    uint32_t detected_mm : 12;
+    bool b_first_forward : 1;
+    bool b_body_scan : 1;
+    uint32_t body_index : 4;
+    uint32_t side_remaining_mm : 12;
+    uint16_t body_ranges[OBSTACLE_BODY_POINTS];
+    uint8_t scan_failure;
     uint32_t command;
 } navigation_t;
 
@@ -538,6 +568,14 @@ Validate START/STOP/RESET/E-stop against the current state.
 `void navigation_barcode(navigation_t * p_navigation, uint8_t barcode);`
 
 Consume one barcode once, pre-empting line following.
+
+`bool navigation_obstacle_plan(navigation_t * p_navigation, uint16_t width_mm, uint16_t left_cm, uint16_t right_cm);`
+
+Accept a bounded width and side clearances for a pending bypass.
+
+`bool navigation_body_scan(navigation_t * p_navigation);`
+
+Request a centred-sensor body sweep for a pending bypass.
 
 `void navigation_step(navigation_t * p_navigation, uint8_t motion_mode, bool b_done, bool b_line_valid, bool b_line_lost, bool b_on_hump, uint16_t range_cm, bool b_range_valid, bool b_scan_ready, bool b_scan_left, bool b_barcode_zone, bool b_safety_latched);`
 
@@ -555,13 +593,17 @@ typedef struct
     uint32_t best_angle : 6;
     uint32_t best_cm : 9;
     uint32_t range_cm : 9;
-    uint32_t coarse_index : 3;
-    uint32_t fine_index : 2;
+    uint32_t coarse_index : 5;
     uint32_t retries : 2;
     bool     b_left : 1;
     bool     b_valid : 1;
     bool     b_ready : 1;
     uint32_t scan_ms : 13;
+    uint16_t scan_cm[OBSTACLE_SCAN_POINTS];
+    uint16_t width_mm;
+    uint16_t left_cm;
+    uint16_t right_cm;
+    uint8_t reason;
 } obstacle_t;
 
 /** @brief Reset the recoverable abort state and face the sensor forward.
@@ -572,15 +614,27 @@ Begin a stationary scan; reject overlapping requests.
 
 `void obstacle_sample(obstacle_t * p_obstacle, uint16_t range_cm, bool b_valid);`
 
-Consume one median-of-three range after servo settling.
+Consume a 3-degree sweep sample and estimate both obstacle edges.
 
 `void obstacle_tick(obstacle_t * p_obstacle, uint16_t elapsed_ms);`
 
-Enforce a five-second whole-scan deadline.
+Enforce the configured whole-scan deadline.
 
 `uint16_t obstacle_median(uint16_t first, uint16_t second, uint16_t third);`
 
 Return an outlier-resistant median without adding readings.
+
+`uint16_t obstacle_range(const uint16_t * p_ranges, uint8_t echoes);`
+
+Combine zero to three echoes; no echo reports the maximum range.
+
+`uint16_t obstacle_body_width(const uint16_t * p_ranges);`
+
+Estimate width from body headings -90..90 in 15-degree steps. Returns zero when either edge or the front face cannot be established.
+
+`const char * obstacle_reason_name(uint8_t reason);`
+
+Describe the scan rejection or wider-scan request.
 
 ## testing/host/motor_test.h
 

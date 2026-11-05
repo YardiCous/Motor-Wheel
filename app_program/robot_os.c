@@ -96,6 +96,7 @@ typedef struct
     uint8_t  look;
     uint16_t faults;
     bool     b_avoided;
+    uint32_t report_at_ms;
 } bench_t;
 #endif /* OBSTACLE_TEST */
 
@@ -115,6 +116,9 @@ static ID                gh_command_queue                       = 0;
 static ID                gh_telemetry_queue                     = 0;
 static ID                gh_echo_flag                           = 0;
 static ID                gh_ack_queue                           = 0;
+static uint16_t g_scan_width_mm = 0u;
+static uint16_t g_scan_left_cm = 0u;
+static uint16_t g_scan_right_cm = 0u;
 static ID                gh_cyclic                              = 0;
 
 static uint32_t field_read(uint16_t offset, uint8_t width);
@@ -137,10 +141,8 @@ static void     telemetry_task(INT start, void * p_argument);
 static void motion_cycle(motion_t * p_motion);
 static bool wheel_speeds(int32_t edges_left, int32_t edges_right);
 #endif /* MOTOR_TEST && ENCODER_TEST */
-#if !OBSTACLE_TEST
 static void line_cycle(line_t * p_line);
-#else
-static void line_stub(void);
+#if OBSTACLE_TEST
 static void bench_init(bench_t * p_bench);
 static void bench_step(navigation_t * p_navigation, bench_t * p_bench);
 #endif /* OBSTACLE_TEST */
@@ -157,13 +159,15 @@ static void line_report(void);
 #if ((!MOTOR_TEST) && (!ENCODER_TEST))
 static void navigation_cycle(navigation_t * p_navigation);
 static void local_commands(navigation_t * p_navigation);
+static void local_command(navigation_t * p_navigation, uint8_t command,
+                           bool b_latched);
 static void remote_commands(navigation_t * p_navigation);
 static void dispatch_navigation(navigation_t * p_navigation);
 #endif /* MOTOR_TEST && ENCODER_TEST */
 #if !LINE_TEST
+static void report_scan_result(const obstacle_t * p_obstacle);
 static void     obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle);
 static bool     range_sample(uint16_t * p_range);
-static uint16_t ping_range(const uint16_t * p_ranges, uint8_t echoes);
 static uint8_t  read_pings(uint16_t * p_ranges);
 #endif /* LINE_TEST */
 static uint16_t current_faults(void);
@@ -517,13 +521,6 @@ static void line_task(INT start, void * p_argument)
 {
     (void)start;
     (void)p_argument;
-#if OBSTACLE_TEST
-    for (;;)
-    {
-        wait_release();
-        line_stub();
-    }
-#else
     line_t detector = {0};
     line_init(&detector);
 
@@ -532,7 +529,6 @@ static void line_task(INT start, void * p_argument)
         wait_release();
         line_cycle(&detector);
     }
-#endif /* OBSTACLE_TEST */
 }
 
 /** @brief I2C failure recovery never blocks startup on WiFi. */
@@ -787,7 +783,6 @@ static bool wheel_speeds(int32_t edges_left, int32_t edges_right)
 
 #endif /* MOTOR_TEST && ENCODER_TEST */
 
-#if !OBSTACLE_TEST
 /** @brief Line errors and full-resolution sensor samples have one writer. */
 static void line_cycle(line_t * p_line)
 {
@@ -833,8 +828,6 @@ static void line_cycle(line_t * p_line)
     board_io_unlock(mask);
     heartbeat(1u);
 }
-
-#endif /* OBSTACLE_TEST */
 
 #if ((!OBSTACLE_TEST) && (!LINE_TEST))
 /** @brief Failed or aged data invalidates height instead of inventing a
@@ -940,7 +933,27 @@ static void navigation_cycle(navigation_t * p_navigation)
     uint32_t obstacle_word  = field_read(103u, 9u);
     uint32_t obstacle_state = field_read(132u, 3u);
     bool     b_scan_ready   = (OBSTACLE_PLAN == obstacle_state);
+    if ((OBSTACLE_BODY_SCAN == obstacle_state) &&
+        (DATA_FORMATS_AVOID == p_navigation->state) &&
+        (0u == p_navigation->stage))
+    {
+        (void)navigation_body_scan(p_navigation);
+    }
+
     bool     b_scan_left    = (field_read(112u, 6u) < 30u);
+    if (b_scan_ready && (DATA_FORMATS_AVOID == p_navigation->state) &&
+        (0u == p_navigation->stage) && (0u == p_navigation->width_mm))
+    {
+        mask = board_io_lock();
+        uint16_t width = g_scan_width_mm;
+        uint16_t left = g_scan_left_cm;
+        uint16_t right = g_scan_right_cm;
+        board_io_unlock(mask);
+        bool b_plan = navigation_obstacle_plan(p_navigation, width,
+                                               left, right);
+        p_navigation->b_fault = (p_navigation->b_fault) || (!b_plan);
+    }
+
     /* Packet fields are explicitly bounded to their destination widths. */
     navigation_step(p_navigation, (motion_word >> 22u) & 7u, b_done,
                     b_line_valid, b_line_lost, 0u != field_read(137u, 1u),
@@ -990,18 +1003,15 @@ static void local_commands(navigation_t * p_navigation)
 
         if (0u != (pressed & 2u))
         {
-            (void)navigation_supervise(p_navigation, DATA_FORMATS_ESTOP,
-                                       b_latched);
+            local_command(p_navigation, DATA_FORMATS_ESTOP, b_latched);
         }
         else if (0u != (pressed & 4u))
         {
-            (void)navigation_supervise(p_navigation, DATA_FORMATS_RESET,
-                                       b_latched);
+            local_command(p_navigation, DATA_FORMATS_RESET, b_latched);
         }
         else if (0u != (pressed & 1u))
         {
-            (void)navigation_supervise(p_navigation, DATA_FORMATS_START,
-                                       b_latched);
+            local_command(p_navigation, DATA_FORMATS_START, b_latched);
         }
         else
         {
@@ -1010,6 +1020,23 @@ static void local_commands(navigation_t * p_navigation)
 
         g_buttons.previous = buttons;
     }
+}
+
+/** @brief Report local command acceptance without changing safety policy. */
+static void local_command(navigation_t * p_navigation, uint8_t command,
+                           bool b_latched)
+{
+    bool b_accepted = navigation_supervise(p_navigation, command, b_latched);
+#if OBSTACLE_TEST
+    const char * p_name = (DATA_FORMATS_START == command) ? "START" : "RESET";
+    p_name = (DATA_FORMATS_ESTOP == command) ? "ESTOP" : p_name;
+    tm_printf((UB *)"CONTROL: %s %s nav=%u latched=%u faults=0x%03x\n",
+              (UB *)p_name, (UB *)(b_accepted ? "accepted" : "rejected"),
+              (unsigned)p_navigation->state, b_latched ? 1u : 0u,
+              (unsigned)field_read(37u, 12u));
+#else
+    (void)b_accepted;
+#endif /* OBSTACLE_TEST */
 }
 
 /** @brief Network sequence and age validation happen before mission mutation.
@@ -1101,7 +1128,6 @@ static void dispatch_navigation(navigation_t * p_navigation)
         g_shared.b_queue_fault          = false;
         g_shared.b_range_fault          = false;
         g_shared.b_scan_request         = false;
-        g_shared.b_scan_request         = false;
         g_shared.reset_at_ms            = g_heartbeat[3];
         p_navigation->b_reset_requested = false;
         p_navigation->b_fault           = false;
@@ -1188,20 +1214,6 @@ static void line_report(void)
 #endif /* LINE_TEST */
 
 #if OBSTACLE_TEST
-/** @brief Bench stand-in: a perfectly centred line that is always visible.
- * Line error is offset binary, so 127 means zero steering.
- */
-static void line_stub(void)
-{
-    field_write(121u, 8u, 127u);
-    uint32_t mask           = board_io_lock();
-    g_shared.b_line_ready   = true;
-    g_shared.b_line_visible = true;
-    g_shared.b_line_lost    = false;
-    board_io_unlock(mask);
-    heartbeat(1u);
-}
-
 /** @brief Console text is only printed when something changes. */
 static void bench_init(bench_t * p_bench)
 {
@@ -1210,25 +1222,30 @@ static void bench_init(bench_t * p_bench)
     p_bench->look      = 0u;
     p_bench->faults    = 0u;
     p_bench->b_avoided = false;
-    tm_printf((UB *)"OBSTACLE TEST: box ahead, press START (GP20)\n");
+    p_bench->report_at_ms = board_io_time_ms();
+    tm_printf((UB *)"OBSTACLE TEST: line tracking + bypass, START (GP20)\n");
     tm_printf((UB *)"OBSTACLE TEST: E-stop is GP21, RESET is GP22\n");
     tm_printf((UB *)"OBSTACLE TEST: scan 0 idle 1 coarse 2 fine 3 plan\n");
-    tm_printf((UB *)"OBSTACLE TEST: scan 4 bypass 5 recover 6 abort\n");
-    tm_printf((UB *)"BYPASS: 1 turn out, 2 side step, 3 face ahead, 4 look\n");
-    tm_printf((UB *)"BYPASS: 5 turn out, 6 fwd step, 7 face line, 8 look\n");
+    tm_printf((UB *)"OBSTACLE TEST: scan 4 bypass 5 recover 6 abort 7 body\n");
+    tm_printf((UB *)"BYPASS: 1 turn 90, 2 measured width, 3 turn back 90\n");
+    tm_printf((UB *)"BYPASS: 6 detected distance, 7 face line, 8 look\n");
     tm_printf((UB *)"BYPASS: 9 turn out, 10 back to line, 11 turn out\n");
+    tm_printf((UB *)"BYPASS: blocked -> turn back 90, move %u mm, recheck\n",
+              (unsigned)((ROBOT_TURN_MM_SECOND * ROBOT_BYPASS_STEP_MS) /
+                         1000u));
     tm_printf((UB *)"FAULT BITS: 001 stall 002 encoder 004 imu 008 noecho\n");
     tm_printf((UB *)"FAULT BITS: 020 impact 040 estop/close 080 watchdog\n");
-    tm_printf((UB *)"FAULT BITS: 100 range 200 timeout 400 queue\n");
+    tm_printf((UB *)"FAULT BITS: 100 range 200 scan/path/deadline 400 queue\n");
 }
 
-/** @brief Report progress and stop once the bypass has returned to FOLLOW. */
+/** @brief Report progress as bypass recovery resumes line tracking. */
 static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
 {
     static const char * const g_names[8] = {
         "?", "IDLE", "FOLLOW", "BARCODE", "HUMP", "AVOID", "SEARCH", "FAULT"};
     uint8_t state = (uint8_t)p_navigation->state;
     uint8_t stage = (uint8_t)p_navigation->stage;
+    uint32_t now = board_io_time_ms();
     bool    b_changed =
         (state != p_bench->state) ||
         ((DATA_FORMATS_AVOID == state) && (stage != p_bench->stage));
@@ -1239,6 +1256,45 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
                   (UB *)g_names[state & 7u], (unsigned)stage,
                   (unsigned)field_read(103u, 9u),
                   (unsigned)field_read(132u, 3u));
+        if ((DATA_FORMATS_AVOID == state) && (1u == stage))
+        {
+            tm_printf((UB *)"PLAN: width=%u mm offset=%u mm forward=%u mm "
+                            "left=%u cm right=%u cm choose=%s\n",
+                      (unsigned)p_navigation->width_mm,
+                      (unsigned)p_navigation->side_mm,
+                      (unsigned)p_navigation->detected_mm,
+                      (unsigned)p_navigation->left_cm,
+                      (unsigned)p_navigation->right_cm,
+                      (UB *)(p_navigation->b_left ? "left" : "right"));
+        }
+    }
+
+    if (b_changed || ((now - p_bench->report_at_ms) >= 1000u))
+    {
+        p_bench->report_at_ms = now;
+        uint32_t mask = board_io_lock();
+        bool b_latched = g_shared.b_latched;
+        bool b_line_ready = g_shared.b_line_ready;
+        bool b_imu_ready = g_shared.b_imu_ready;
+        bool b_reset = g_shared.b_reset;
+        uint32_t ages[ROBOT_HEARTBEATS] = {0u};
+
+        for (uint8_t source = 0u; source < ROBOT_HEARTBEATS; ++source)
+        {
+            ages[source] = now - g_heartbeat[source];
+        }
+
+        board_io_unlock(mask);
+        tm_printf((UB *)"STATUS: nav=%u motion=%u buttons=%u latched=%u "
+                        "line_ready=%u imu_ready=%u reset=%u faults=0x%03x\n",
+                  (unsigned)state,
+                  (unsigned)((field_read(5u, 32u) >> 22u) & 7u),
+                  (unsigned)board_io_buttons(), b_latched ? 1u : 0u,
+                  b_line_ready ? 1u : 0u, b_imu_ready ? 1u : 0u,
+                  b_reset ? 1u : 0u, (unsigned)field_read(37u, 12u));
+        tm_printf((UB *)"AGES ms: motion=%u line=%u imu=%u nav=%u scan=%u\n",
+                  (unsigned)ages[0], (unsigned)ages[1], (unsigned)ages[2],
+                  (unsigned)ages[3], (unsigned)ages[4]);
     }
 
     if ((uint8_t)p_navigation->look != p_bench->look)
@@ -1247,6 +1303,13 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
                   (unsigned)p_navigation->look,
                   (unsigned)p_navigation->left_cm,
                   (unsigned)p_navigation->right_cm);
+        if (p_navigation->b_body_scan)
+        {
+            tm_printf((UB *)"BODY SCAN: phase=%u point=%u range=%u cm\n",
+                      (unsigned)p_navigation->look,
+                      (unsigned)p_navigation->body_index,
+                      (unsigned)field_read(103u, 9u));
+        }
         p_bench->look = (uint8_t)p_navigation->look;
     }
 
@@ -1256,6 +1319,11 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
     {
         tm_printf((UB *)"OBSTACLE TEST: faults=0x%03x range=%u cm\n",
                   (unsigned)faults, (unsigned)field_read(103u, 9u));
+        if (0u != p_navigation->scan_failure)
+        {
+            tm_printf((UB *)"BODY SCAN: failed: %s\n",
+                      (UB *)obstacle_reason_name(p_navigation->scan_failure));
+        }
         p_bench->faults = faults;
     }
 
@@ -1263,13 +1331,8 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
 
     if ((p_bench->b_avoided) && (DATA_FORMATS_FOLLOW == state))
     {
-        (void)navigation_supervise(p_navigation, DATA_FORMATS_STOP, false);
-        uint32_t mask = board_io_lock();
-        /* Let the scanner rearm, so START can run the whole test again. */
-        g_shared.b_reset_scan = true;
-        board_io_unlock(mask);
         p_bench->b_avoided = false;
-        tm_printf((UB *)"OBSTACLE TEST: bypass finished, stopped\n");
+        tm_printf((UB *)"OBSTACLE TEST: bypass finished, following line\n");
     }
 
     p_bench->state = state;
@@ -1290,7 +1353,9 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
 
     if (b_reset)
     {
+        board_io_range_reset();
         obstacle_init(p_obstacle);
+        b_request = false;
     }
 
     if (b_request && (MOTION_IDLE == motion_mode))
@@ -1304,7 +1369,8 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     uint32_t vehicle = field_read(2u, 3u);
 
     if ((DATA_FORMATS_AVOID == vehicle) && (MOTION_IDLE != motion_mode) &&
-        (OBSTACLE_PLAN == p_obstacle->state))
+        ((OBSTACLE_PLAN == p_obstacle->state) ||
+         (OBSTACLE_BODY_SCAN == p_obstacle->state)))
     {
         p_obstacle->state = OBSTACLE_BYPASS;
     }
@@ -1336,8 +1402,10 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     uint32_t start          = board_io_time_ms();
     uint8_t  echoes         = read_pings(ranges);
 
-    /* No echo at all means nothing within range, so it reads as clear. */
-    uint16_t range = ping_range(ranges, echoes);
+    /* No echo is the sensor's out-of-range result, not zero distance. */
+    uint16_t range = obstacle_range(ranges, echoes);
+    bool b_forward = (30u == measured_angle);
+    uint32_t previous_state = p_obstacle->state;
     obstacle_sample(p_obstacle, range, true);
 #if OBSTACLE_TEST
     tm_printf((UB *)"RANGE: %u cm echoes=%u angle=%u raw=%u,%u,%u\n",
@@ -1346,8 +1414,17 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
 #endif /* OBSTACLE_TEST */
     /* One scan cycle is bounded below 500 ms and fits uint16_t. */
     obstacle_tick(p_obstacle, (uint16_t)(board_io_time_ms() - start + 100u));
+    if ((OBSTACLE_COARSE == previous_state) &&
+        (OBSTACLE_COARSE != p_obstacle->state))
+    {
+        report_scan_result(p_obstacle);
+    }
     uint32_t state     = p_obstacle->state;
-    bool     b_forward = (30u == measured_angle);
+    mask = board_io_lock();
+    g_scan_width_mm = p_obstacle->width_mm;
+    g_scan_left_cm = p_obstacle->left_cm;
+    g_scan_right_cm = p_obstacle->right_cm;
+    board_io_unlock(mask);
     field_write(103u, 9u, b_forward ? range : 0u);
     field_write(112u, 6u,
                 (OBSTACLE_PLAN == state) ? p_obstacle->best_angle
@@ -1361,6 +1438,21 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     heartbeat(4u);
 }
 
+/** @brief Identify why a stopped servo scan needs recovery or must abort. */
+static void report_scan_result(const obstacle_t * p_obstacle)
+{
+#if OBSTACLE_TEST
+    tm_printf((UB *)"SCAN: state=%u reason=%s width=%u mm left=%u cm "
+                    "right=%u cm\n",
+              (unsigned)p_obstacle->state,
+              (UB *)obstacle_reason_name(p_obstacle->reason),
+              (unsigned)p_obstacle->width_mm, (unsigned)p_obstacle->left_cm,
+              (unsigned)p_obstacle->right_cm);
+#else
+    (void)p_obstacle;
+#endif /* OBSTACLE_TEST */
+}
+
 /** @brief Edge timestamps are captured by the ISR; this task only waits. */
 static bool range_sample(uint16_t * p_range)
 {
@@ -1370,7 +1462,26 @@ static bool range_sample(uint16_t * p_range)
     UINT pattern = 0u;
     ER   result =
         tk_wai_flg(gh_echo_flag, 1u, TWF_ORW | TWF_BITCLR, &pattern, 25);
+#if OBSTACLE_TEST
+    board_io_range_diag_t diagnostic = {0};
+    board_io_range_diagnostics(&diagnostic);
+#endif /* OBSTACLE_TEST */
     bool     b_valid = board_io_range(p_range);
+#if OBSTACLE_TEST
+    if ((E_OK != result) || (!b_valid) || (*p_range < 2u))
+    {
+        tm_printf((UB *)"ECHO: wait=%d state=%u width=%u us rises=%u "
+                        "falls=%u pins=%u ctrl=0x%x pad=0x%x "
+                        "irq_raw=0x%x irq_en=0x%x\n",
+                  (int)result, (unsigned)diagnostic.state,
+                  (unsigned)diagnostic.width_us, (unsigned)diagnostic.rises,
+                  (unsigned)diagnostic.falls, (unsigned)diagnostic.pins,
+                  (unsigned)diagnostic.gpio_control,
+                  (unsigned)diagnostic.gpio_pad,
+                  (unsigned)diagnostic.irq_raw,
+                  (unsigned)diagnostic.irq_enabled);
+    }
+#endif /* OBSTACLE_TEST */
     uint32_t elapsed = board_io_time_ms() - ping_at;
 
     if (elapsed < ROBOT_RANGE_PERIOD_MS)
@@ -1407,32 +1518,6 @@ static uint8_t read_pings(uint16_t * p_ranges)
     return echoes;
 }
 
-/** @brief Median of three echoes, the nearer of two, or the only one.
- * With no echo at all, nothing is within range, so it reports the maximum.
- */
-static uint16_t ping_range(const uint16_t * p_ranges, uint8_t echoes)
-{
-    uint16_t range = ROBOT_RANGE_MAX_CM;
-
-    if (3u == echoes)
-    {
-        range = obstacle_median(p_ranges[0], p_ranges[1], p_ranges[2]);
-    }
-    else if (2u == echoes)
-    {
-        range = (p_ranges[0] < p_ranges[1]) ? p_ranges[0] : p_ranges[1];
-    }
-    else if (1u == echoes)
-    {
-        range = p_ranges[0];
-    }
-    else
-    {
-        /* No echo: nothing within the sensor's range. */
-    }
-
-    return range;
-}
 #endif /* LINE_TEST */
 
 /** @brief All producers' masks are merged under one interrupt exclusion. */

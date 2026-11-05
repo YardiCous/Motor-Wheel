@@ -69,6 +69,15 @@ and the units for biased fields are described below and in the headers.
 | board_io / capture_t | `left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / capture_t | `right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / capture_t | `rise_us` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / capture_t | `echo_rises` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / capture_t | `echo_falls` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / board_io_range_diag_t | `width_us` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / board_io_range_diag_t | `rises` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / board_io_range_diag_t | `falls` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / board_io_range_diag_t | `gpio_control` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / board_io_range_diag_t | `gpio_pad` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / board_io_range_diag_t | `irq_raw` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / board_io_range_diag_t | `irq_enabled` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / shared_t | `b_latched` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_stop` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_reset` | 0..1 | 1 | bool bit-field |
@@ -92,6 +101,7 @@ and the units for biased fields are described below and in the headers.
 | robot_os / buttons_t | `stable_count` | 0..3 | 2 | unsigned bit-field |
 | robot_os / buttons_t | `candidate` | 0..7 | 3 | unsigned bit-field |
 | robot_os / buttons_t | `previous` | 0..7 | 3 | unsigned bit-field |
+| robot_os / bench_t | `report_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | mqtt_utk / mqtt_utk_state_t | `state` | 0..4 | 3 | unsigned bit-field |
 | mqtt_utk / mqtt_utk_state_t | `retry_exponent` | 0..5 | 3 | unsigned bit-field |
 | mqtt_utk / mqtt_utk_state_t | `b_timer_started` | 0..1 | 1 | bool bit-field |
@@ -197,7 +207,7 @@ and the units for biased fields are described below and in the headers.
 | terrain / terrain_t | `b_motion_changed` | 0..1 | 1 | bool bit-field |
 | terrain / terrain_t | `b_request_init` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `state` | 0..7 | 3 | unsigned bit-field |
-| navigation / navigation_t | `stage` | 0..8 | 4 | unsigned bit-field |
+| navigation / navigation_t | `stage` | 0..11 | 4 | unsigned bit-field |
 | navigation / navigation_t | `b_waiting` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `b_scan_requested` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `b_reset_requested` | 0..1 | 1 | bool bit-field |
@@ -216,19 +226,24 @@ and the units for biased fields are described below and in the headers.
 | navigation / navigation_t | `side_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `steps` | 0..31 | 5 | unsigned bit-field |
 | navigation / navigation_t | `b_margin` | 0..1 | 1 | bool bit-field |
+| navigation / navigation_t | `width_mm` | 0..4095 | 12 | unsigned bit-field |
+| navigation / navigation_t | `detected_mm` | 0..4095 | 12 | unsigned bit-field |
+| navigation / navigation_t | `b_first_forward` | 0..1 | 1 | bool bit-field |
+| navigation / navigation_t | `b_body_scan` | 0..1 | 1 | bool bit-field |
+| navigation / navigation_t | `body_index` | 0..15 | 4 | unsigned bit-field |
+| navigation / navigation_t | `side_remaining_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `command` | 0..16777215 | 24 | explicit kind2 + distance12 + speed9 + reverse1; high8 zero |
-| obstacle / obstacle_t | `state` | 0..6 | 3 | unsigned bit-field |
+| obstacle / obstacle_t | `state` | 0..7 | 3 | unsigned bit-field |
 | obstacle / obstacle_t | `angle` | 0..60 | 6 | unsigned bit-field |
 | obstacle / obstacle_t | `best_angle` | 0..60 | 6 | unsigned bit-field |
 | obstacle / obstacle_t | `best_cm` | 0..400 | 9 | unsigned bit-field |
 | obstacle / obstacle_t | `range_cm` | 0..400 | 9 | unsigned bit-field |
-| obstacle / obstacle_t | `coarse_index` | 0..5 | 3 | unsigned bit-field |
-| obstacle / obstacle_t | `fine_index` | 0..3 | 2 | unsigned bit-field |
+| obstacle / obstacle_t | `coarse_index` | 0..21 | 5 | unsigned bit-field |
 | obstacle / obstacle_t | `retries` | 0..3 | 2 | unsigned bit-field |
 | obstacle / obstacle_t | `b_left` | 0..1 | 1 | bool bit-field |
 | obstacle / obstacle_t | `b_valid` | 0..1 | 1 | bool bit-field |
 | obstacle / obstacle_t | `b_ready` | 0..1 | 1 | bool bit-field |
-| obstacle / obstacle_t | `scan_ms` | 0..5000 | 13 | unsigned bit-field |
+| obstacle / obstacle_t | `scan_ms` | 0..8000 | 13 | unsigned bit-field |
 | terrain_test / sim_t | `seed` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | terrain_test / sim_t | `starts` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | terrain_test / sim_t | `side_starts` | 0..4294967295 | 32 | 32-bit modulo counter/time |

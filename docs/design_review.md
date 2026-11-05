@@ -52,7 +52,7 @@ course rules.
 | NFR5 | Ten correct passes for each barcode at 0.25 m/s and 0.5-m/s entry, zero wrong commands | Host decoder passes; printed course tests pending |
 | NFR6 | Peak height within ±10 mm over ten known-height ramp traversals | Fine fixed-point accumulation passes synthetic input; physical accuracy open |
 | NFR7 | Forward pings spaced ≥60 ms; median updated within 180 ms plus scheduling; no echo wait >25 ms | Timed nonblocking design; hardware timestamps required |
-| NFR8 | Minimum stopping clearance 120 mm; line recovery ≤3 s; stationary scan ≤5 s | Enforced limits and fail-safe exits; stopping/recovery video required |
+| NFR8 | Minimum stopping clearance 120 mm; line recovery ≤3 s; stationary scan ≤8 s | Enforced limits and fail-safe exits; stopping/recovery video required |
 
 ### Timing and numerical budgets
 
@@ -95,7 +95,9 @@ The complete periods, numeric priorities, core affinity, stacks and triggers are
 in [TEAM.md](../TEAM.md). Seven application tasks use one 5-ms cyclic release.
 Safety is priority 1; Motion and Line are 2; Terrain is 3, ahead of WiFi at 4;
 Navigation is 5; Obstacle 6; Telemetry producer 8. USB remains priority 3.
-Ranging blocks on an event flag; echo timing and the trigger pulse are interrupts.
+Ranging blocks on an event flag; echo timing uses GPIO interrupts. The trigger
+pulse uses a short critical section (2-us low, 12-us high), independent of
+timer-alarm interrupts. RESET restores ranging GPIO and capture state.
 No real-time task waits for network publishing or queue space.
 
 All application access is on core 0, including the existing network owner.
@@ -188,32 +190,48 @@ acknowledgement before issuing its replacement FOLLOW command.
 stateDiagram-v2
     [*] --> IDLE
     IDLE --> COARSE: scan requested and motors stopped
-    COARSE --> FINE: five settled scan points complete
-    FINE --> PLAN: three fine points have >=700-mm clearance
-    COARSE --> ABORT: three failures or 5-s scan deadline
-    FINE --> ABORT: no safe side / failures / deadline
+    COARSE --> PLAN: 21 points, both edges found, a side has clearance
+    COARSE --> BODY: edges or side route not established
+    COARSE --> ABORT: invalid batches, front unconfirmed, 8-s deadline
+    BODY --> BYPASS: wider width and side clearance established
+    BODY --> ABORT: invalid samples, missing edges, blocked route
     PLAN --> BYPASS: first motion accepted
     BYPASS --> RECOVER: bypass complete
     RECOVER --> IDLE: line reacquired / FOLLOW resumes
     ABORT --> IDLE: explicit RESET
 ```
 
-The servo uses 3-degree indices 0..60. Coarse points are 30°, 60°, 90°, 120°,
-150°; the clearest noncentral side is verified at three adjacent fine angles.
-Each point uses a median of three valid pings. A missing echo is invalid, never
-unbounded clearance. Servo changes wait 100 ms; every ping is at least 60 ms
-apart. Forward range uses a three-ping median at 180 ms; it is not an on-request
-only service. Fine side readings are never published as forward distance.
+The servo scans 60°..120° in 3-degree increments (±30° around forward).
+Twenty-one settled points estimate the obstacle edges. A ray counts as beyond
+an edge when its forward projection exceeds the centre face by 50 mm. Width
+is the sum of the two edge offsets, each estimated as centre distance times
+the tangent of the first clear angle. Unseen edges or inadequate side views
+request body measurement (`scan=7`) instead of immediately faulting. With the
+servo centred, the robot turns left 90 degrees, samples at 15-degree intervals
+through right 90 degrees, then returns to its original heading. Rays up to
+75 degrees bound width, and the 90-degree endpoints measure side clearance.
+Cumulative calibrated turn targets prevent rounding drift across increments.
+The body scan rejects invalid samples and unbounded widths. The flat-face
+geometry is approximate and affected by sensor offset from the rotation
+centre; robot footprint, mounting, and turn calibration need floor validation.
+Each point uses up to three echoes, spaced at least 60 ms; servo changes settle
+for 100 ms. No echo retains the existing 400-cm out-of-range convention, but
+an all-empty scan cannot create a valid width. Side rays are not published as
+forward range. A complete scan must finish within 8 seconds.
 
-Bypass sequence: turn 90° toward the selected side, move 400 mm, turn back 90°,
-move 1000 mm parallel to the route, turn toward the line, move 400 mm, turn back
-90°, then bounded line confirmation/search. Each move/turn has a 10-s limit.
-The fixed path assumes an isolated box no wider/deeper than 300 mm and sufficient
-free space to the chosen side. This must be validated, including robot footprint;
-the sparse profile cannot certify arbitrary obstacle shapes or side corridors.
-Forward clearance below 120 mm aborts motion. Humps and obstacles are assumed
-not to overlap; a confirmed obstacle on a hump must be handled as a stopped fault
-rather than an unvalidated bypass.
+Bypass sequence: turn 90° to the selected side, move full estimated width plus
+150 mm clearance, turn back 90°, and move the saved obstacle-detection range.
+Quarter turns use 98 mm of calibrated wheel travel. Fresh forward readings
+check each initial leg after its turn. The first forward leg reaches the
+original obstacle face, so bounded step-and-check moves continue until its
+depth has cleared, followed by a 200-mm forward margin. The robot then returns
+toward the line, turns back 90°, and performs bounded line recovery. Each leg
+has a 10-second deadline. Width and motion are limited to the command fields.
+Large lateral offsets are split into checked legs limited to eight seconds.
+`BODY_SCAN=1` forces body measurement even after a successful servo scan;
+normal builds automatically use it when required. The head must face forward
+during body measurement. Clearance below 120 mm aborts motion. Hardware calibration,
+footprint clearance, and physical stopping distance require floor validation.
 
 ### 6.2 WiFi communication, telemetry and remote interface
 

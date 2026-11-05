@@ -13,19 +13,30 @@ CORE = ["data_formats.c", "subsystem1/telemetry.c", "subsystem2/motion.c",
 FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Werror", "-Wshadow",
          "-Wstrict-prototypes", "-Wmissing-prototypes", "-Wsign-conversion",
          "-pedantic", "-DROBOT_ENCODER_EDGES_TURN=960u",
-         "-DROBOT_TRACK_MM=140u",
+         "-DROBOT_TRACK_MM=140u", "-DROBOT_QUARTER_TURN_MM=109u",
          "-DROBOT_LINE_STRADDLE=0u"]
 
 
-def build(root, executable, sanitize=True):
+def build(root, executable, sanitize=True, bench=False):
     command = [os.environ.get("CC", "gcc"), *FLAGS, "-g", "-O1"]
     if sanitize:
         command += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
+    if bench:
+        command += ["-DOBSTACLE_TEST=1"]
     command += [str(root / "testing/host/verify_main.c")]
     command += [str(root / "testing/host/motor_test.c")]
     command += [str(root / "testing/host/terrain_test.c")]
     command += [str(root / "app_program" / source) for source in CORE]
     command += ["-o", str(executable)]
+    subprocess.run(command, check=True)
+
+
+def build_board_io(root, executable):
+    command = [os.environ.get("CC", "gcc"), *FLAGS, "-g", "-O1",
+               "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+               "-DBOARD_IO_HOST_TEST=1", "-I" + str(root / "testing/board_io"),
+               str(root / "testing/board_io/verify_range.c"),
+               str(root / "app_program/board_io.c"), "-o", str(executable)]
     subprocess.run(command, check=True)
 
 
@@ -47,6 +58,12 @@ def main():
         executable = Path(temporary) / "verify"
         build(ROOT, executable)
         output = run(executable)
+        board_executable = Path(temporary) / "verify_board_io"
+        build_board_io(ROOT, board_executable)
+        output += run(board_executable)
+        bench_executable = Path(temporary) / "verify_bench"
+        build(ROOT, bench_executable, bench=True)
+        output += run(bench_executable)
         print(output, end="")
         from robot_protocol import decode, encode_command
         vector = next(line.split()[1] for line in output.splitlines()

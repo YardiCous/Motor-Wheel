@@ -9,6 +9,9 @@
 #include "robot_config.h"
 
 #include <tk/tkernel.h>
+#if BOARD_IO_HOST_TEST
+#include "board_io_mock.h"
+#endif /* BOARD_IO_HOST_TEST */
 
 #if TM_CONSOLE_UART
 #error Robot ultrasonic pins require USB console and CRASH_REPORT=0.
@@ -23,7 +26,8 @@
 #define BOARD_TIMER 0x40054000u
 #define BOARD_RESETS 0x4000c000u
 #define BOARD_GPIO_IRQ 13u
-#define BOARD_TRIGGER_IRQ 3u
+#define BOARD_TRIGGER_LOW_US 2u
+#define BOARD_TRIGGER_HIGH_US 12u
 #define BOARD_ADC_TIMEOUT_US 100u
 #define BOARD_I2C_TIMEOUT_US 1500u
 #define BOARD_I2C_MAX_READ 8u /* plus the address byte, fits the TX FIFO */
@@ -43,6 +47,8 @@ typedef struct
     uint32_t left;
     uint32_t right;
     uint32_t rise_us;
+    uint32_t echo_rises;
+    uint32_t echo_falls;
     uint32_t echo_width : 15;
     uint32_t echo_state : 2;
     uint32_t last_left : 2;
@@ -66,7 +72,7 @@ static bool     i2c_transfer(uint8_t reg, uint8_t value, uint8_t * p_bytes,
                              uint8_t length);
 static void     encoder_edge(uint32_t inputs, bool b_left);
 static void     board_gpio_isr(uint32_t number);
-static void     board_trigger_isr(uint32_t number);
+static void     trigger_delay(uint32_t duration_us);
 
 /** @brief All pins are configured before any application task starts. */
 bool board_io_init (int32_t h_echo_flag)
@@ -105,8 +111,7 @@ bool board_io_init (int32_t h_echo_flag)
         configure_pin(encoder_pins[index], 5u, false, true);
     }
 
-    configure_pin(0u, 5u, true, false);
-    configure_pin(1u, 5u, false, false);
+    board_io_range_reset();
     configure_pin(2u, 3u, false, true);
     configure_pin(3u, 3u, false, true);
     configure_pin(ROBOT_TRACE_PIN, 5u, true, false);
@@ -128,15 +133,11 @@ bool board_io_init (int32_t h_echo_flag)
     interrupt_config.intatr = TA_HLNG;
     interrupt_config.inthdr = board_gpio_isr;
     bool b_valid = (E_OK == tk_def_int(BOARD_GPIO_IRQ, &interrupt_config));
-    interrupt_config.inthdr = board_trigger_isr;
-    b_valid =
-        b_valid && (E_OK == tk_def_int(BOARD_TRIGGER_IRQ, &interrupt_config));
     write_reg(BOARD_IO + 0xf0u, 0x00cc00c0u);
     write_reg(BOARD_IO + 0xf8u, 0x000000ccu);
     write_reg(BOARD_IO + 0x100u, 0x00cc00c0u);
     write_reg(BOARD_IO + 0x108u, 0x000000ccu);
     EnableInt(BOARD_GPIO_IRQ, 2);
-    EnableInt(BOARD_TRIGGER_IRQ, 2);
     return b_valid;
 }
 
@@ -144,13 +145,21 @@ bool board_io_init (int32_t h_echo_flag)
  */
 uint32_t board_io_lock (void)
 {
+#if BOARD_IO_HOST_TEST
+    return board_io_mock_lock();
+#else
     return disint();
+#endif /* BOARD_IO_HOST_TEST */
 }
 
 /** @brief A driver-local compiler extension restores the CPU mask. */
 void board_io_unlock (uint32_t mask)
 {
+#if BOARD_IO_HOST_TEST
+    board_io_mock_unlock(mask);
+#else
     __asm__ volatile("msr primask, %0" : : "r"(mask) : "memory");
+#endif /* BOARD_IO_HOST_TEST */
 }
 
 /** @brief RP2040's raw timer wraps naturally after about 71 minutes. */
@@ -290,19 +299,48 @@ void board_io_servo (uint8_t angle)
     write_reg(BOARD_PWM + (6u * 20u) + 12u, pulse);
 }
 
-/** @brief TIMER alarm 3 ends the pulse even if a task is preempted. */
-void board_io_ping (void)
+/** @brief Restore only ranging pins and capture; preserve encoder counts. */
+void board_io_range_reset (void)
 {
-    uint32_t mask        = board_io_lock();
-    g_capture.echo_state = 1u;
-    write_reg(BOARD_TIMER + 0x34u, 8u);
-    write_reg(BOARD_TIMER + 0x2038u, 8u);
-    write_reg(BOARD_SIO + 0x14u, 1u);
-    write_reg(BOARD_TIMER + 0x1cu, board_io_time_us() + 10u);
+    uint32_t mask = board_io_lock();
+    configure_pin(0u, 5u, true, false);
+    configure_pin(1u, 5u, false, false);
+    g_capture.echo_state = 0u;
+    g_capture.echo_width = 0u;
+    g_capture.rise_us = 0u;
+    write_reg(BOARD_IO + 0xf0u, 0xc0u);
+    write_reg(BOARD_IO + 0x2100u, 0xc0u);
     board_io_unlock(mask);
 }
 
-/** @brief The usable 2..400-cm range is a nine-bit value. */
+/** @brief A short critical section guarantees both trigger edges. */
+void board_io_ping (void)
+{
+    uint32_t mask = board_io_lock();
+    g_capture.echo_state = 0u;
+    g_capture.echo_width = 0u;
+    write_reg(BOARD_SIO + 0x18u, 1u);
+    trigger_delay(BOARD_TRIGGER_LOW_US);
+    write_reg(BOARD_IO + 0xf0u, 0xc0u);
+    g_capture.echo_state = 1u;
+    write_reg(BOARD_SIO + 0x14u, 1u);
+    trigger_delay(BOARD_TRIGGER_HIGH_US);
+    write_reg(BOARD_SIO + 0x18u, 1u);
+    board_io_unlock(mask);
+}
+
+/** @brief Only the 2-us low and 12-us high trigger phases busy-wait. */
+static void trigger_delay (uint32_t duration_us)
+{
+    uint32_t start = board_io_time_us();
+
+    while ((board_io_time_us() - start) < duration_us)
+    {
+        /* Echo waiting remains interrupt driven and releases the CPU. */
+    }
+}
+
+/** @brief Preserve short echoes as a 1-cm near-limit indication. */
 bool board_io_range (uint16_t * p_cm)
 {
     uint32_t mask        = board_io_lock();
@@ -311,10 +349,27 @@ bool board_io_range (uint16_t * p_cm)
     g_capture.echo_state = 0u;
     board_io_unlock(mask);
     uint32_t cm = (width + 29u) / 58u;
-    b_valid     = b_valid && (cm >= 2u) && (cm <= ROBOT_RANGE_MAX_CM);
+    cm          = (width < 116u) ? 1u : cm;
+    b_valid     = b_valid && (width > 0u) && (cm <= ROBOT_RANGE_MAX_CM);
     /* Range is no greater than 565 before its validity check. */
     *p_cm = b_valid ? (uint16_t)cm : 0u;
     return b_valid;
+}
+
+/** @brief Distinguish no rising edge, stuck-high echo and invalid width. */
+void board_io_range_diagnostics (board_io_range_diag_t * p_diag)
+{
+    uint32_t mask = board_io_lock();
+    p_diag->state = (uint8_t)g_capture.echo_state;
+    p_diag->width_us = g_capture.echo_width;
+    p_diag->rises = g_capture.echo_rises;
+    p_diag->falls = g_capture.echo_falls;
+    p_diag->pins = (uint8_t)(read_reg(BOARD_SIO + 4u) & 3u);
+    p_diag->gpio_control = read_reg(BOARD_IO + 12u);
+    p_diag->gpio_pad = read_reg(BOARD_PADS + 8u);
+    p_diag->irq_raw = read_reg(BOARD_IO + 0xf0u) & 0xc0u;
+    p_diag->irq_enabled = read_reg(BOARD_IO + 0x100u) & 0xc0u;
+    board_io_unlock(mask);
 }
 
 /** @brief Internal pull-ups let switches close directly to ground. */
@@ -335,16 +390,24 @@ void board_io_trace (bool b_high)
 static uint32_t read_reg (uint32_t address)
 {
     /* The address is an aligned peripheral register from the RP2040 map. */
+#if BOARD_IO_HOST_TEST
+    return board_io_mock_read(address);
+#else
     volatile uint32_t * p_register = (volatile uint32_t *)address;
     return *p_register;
+#endif /* BOARD_IO_HOST_TEST */
 }
 
 /** @brief Only aligned, documented peripheral addresses reach this helper. */
 static void write_reg (uint32_t address, uint32_t value)
 {
     /* The address is an aligned peripheral register from the RP2040 map. */
+#if BOARD_IO_HOST_TEST
+    board_io_mock_write(address, value);
+#else
     volatile uint32_t * p_register = (volatile uint32_t *)address;
     *p_register                    = value;
+#endif /* BOARD_IO_HOST_TEST */
 }
 
 /** @brief Configure mux, output enable and pad bias before use. */
@@ -482,6 +545,8 @@ static void board_gpio_isr (uint32_t number)
 
     if (0u != (first & 0xc0u))
     {
+        g_capture.echo_rises += (0u != (first & 0x80u)) ? 1u : 0u;
+        g_capture.echo_falls += (0u != (first & 0x40u)) ? 1u : 0u;
         bool b_high = (0u != (inputs & 2u));
 
         if (b_high && (1u == g_capture.echo_state))
@@ -501,14 +566,6 @@ static void board_gpio_isr (uint32_t number)
             /* Ignore stale edges and unmatched falling edges. */
         }
     }
-}
-
-/** @brief The pulse completes without task delay or a busy-wait loop. */
-static void board_trigger_isr (uint32_t number)
-{
-    (void)number;
-    write_reg(BOARD_SIO + 0x18u, 1u);
-    write_reg(BOARD_TIMER + 0x34u, 8u);
 }
 
 /*** End of file. ***/

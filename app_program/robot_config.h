@@ -32,6 +32,10 @@
 #ifndef ROBOT_TRACK_MM
 #define ROBOT_TRACK_MM 112u
 #endif /* ROBOT_TRACK_MM */
+/* Calibrated wheel travel for a 90-degree turn: 103 * 90 / 95 = 98 mm. */
+#ifndef ROBOT_QUARTER_TURN_MM
+#define ROBOT_QUARTER_TURN_MM 98u
+#endif /* ROBOT_QUARTER_TURN_MM */
 #define ROBOT_MOTOR_LEFT_SIGN 1
 #define ROBOT_MOTOR_RIGHT_SIGN 1
 /* Straight moves: correct 3 mm/s per mm of wheel-distance mismatch,
@@ -52,17 +56,22 @@
 #define ROBOT_STALL_MS 200u
 #define ROBOT_SENSOR_AGE_MS 20u
 #define ROBOT_LINE_LOST_MS 150u
-#define ROBOT_SCAN_MS 5000u
+#define ROBOT_SCAN_MS 8000u
 #define ROBOT_MANOEUVRE_MS 10000u
 #define ROBOT_WARNING_MM 600u
 #define ROBOT_OBSTACLE_MM 300u
 #define ROBOT_CLEARANCE_MM 120u
-/* Sensor-guided bypass: move for STEP_MS, stop, check the obstacle, repeat.
- * After the obstacle is clear, one margin move covers the robot's body. */
-#define ROBOT_BYPASS_STEP_MS 1000u
+/* Bypass: full measured width plus side margin, then detected front range.
+ * Extra STEP_MS moves check obstacle depth before returning to the line. */
+#define ROBOT_BYPASS_STEP_MS 2000u
 #define ROBOT_BYPASS_SIDE_MARGIN_MM 150u
 #define ROBOT_BYPASS_FWD_MARGIN_MM 200u
+/* Keep the sideways total, including its margin, within 12 bits. */
+#if (OBSTACLE_TEST || LINE_TEST)
 #define ROBOT_BYPASS_MAX_STEPS 15u
+#else
+#define ROBOT_BYPASS_MAX_STEPS 12u
+#endif /* OBSTACLE_TEST || LINE_TEST */
 #define ROBOT_RANGE_MAX_CM 400u
 #define ROBOT_IR_THRESHOLD 450u
 /* Line following mode. 1: the tape runs between the left (GP26) and centre

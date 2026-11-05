@@ -108,8 +108,8 @@ endif
 ifeq ($(LINE_TEST),1)
 LINE_TEST_SUFFIX := _linetest
 endif
-# BODY_SCAN=1: with no working scan servo, Navigation turns the whole robot
-# about 45 degrees each way to measure both sides before an obstacle bypass.
+# BODY_SCAN=1 forces body measurement after the initial servo sweep.
+# The normal profile automatically uses body scanning when servo edges fail.
 BODY_SCAN ?= 0
 ifneq ($(filter $(BODY_SCAN),0 1),$(BODY_SCAN))
 $(error Unknown BODY_SCAN '$(BODY_SCAN)'; use 0 or 1)
@@ -117,8 +117,8 @@ endif
 ifeq ($(BODY_SCAN),1)
 BODY_SCAN_SUFFIX := _bodyscan
 endif
-# OBSTACLE_TEST=1 builds the bench obstacle bypass: a stand-in line sensor and
-# IMU let the real scan and bypass run with only motors, encoders and sensor.
+# OBSTACLE_TEST=1 follows the real line sensors and runs scan/bypass.
+# Only the IMU is stubbed; motors, encoders and ranging remain active.
 OBSTACLE_TEST ?= 0
 ifneq ($(filter $(OBSTACLE_TEST),0 1),$(OBSTACLE_TEST))
 $(error Unknown OBSTACLE_TEST '$(OBSTACLE_TEST)'; use 0 or 1)

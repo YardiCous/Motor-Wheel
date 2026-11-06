@@ -20,6 +20,8 @@
 #define BOARD_SIO 0xd0000000u
 #define BOARD_IO 0x40014000u
 #define BOARD_PADS 0x4001c000u
+#define BOARD_PSM 0x40010000u
+#define BOARD_WATCHDOG 0x40058000u
 #define BOARD_PWM 0x40050000u
 #define BOARD_ADC 0x4004c000u
 #define BOARD_I2C 0x40048000u
@@ -75,7 +77,7 @@ static void     board_gpio_isr(uint32_t number);
 static void     trigger_delay(uint32_t duration_us);
 
 /** @brief All pins are configured before any application task starts. */
-bool board_io_init (int32_t h_echo_flag)
+bool board_io_init(int32_t h_echo_flag)
 {
     gh_echo_flag = h_echo_flag;
     write_reg(BOARD_RESETS + 0x3000u, 0x00004011u);
@@ -101,7 +103,10 @@ bool board_io_init (int32_t h_echo_flag)
     write_reg(BOARD_PWM + (5u * 20u), 1u);
     write_reg(BOARD_PWM + (6u * 20u) + 4u, 2000u);
     write_reg(BOARD_PWM + (6u * 20u) + 16u, 19999u);
-    board_io_servo(30u);
+    /* No servo pulses yet: a servo jumping to centre at power-up draws a
+     * surge just as the ultrasonic is starting. The obstacle task centres it
+     * once the ultrasonic has settled. */
+    write_reg(BOARD_PWM + (6u * 20u) + 12u, 0u);
     write_reg(BOARD_PWM + (6u * 20u), 1u);
 
     static const uint8_t encoder_pins[4] = {4u, 5u, 16u, 17u};
@@ -143,7 +148,7 @@ bool board_io_init (int32_t h_echo_flag)
 
 /** @brief All callers and writers are pinned to processor 1, including MQTT.
  */
-uint32_t board_io_lock (void)
+uint32_t board_io_lock(void)
 {
 #if BOARD_IO_HOST_TEST
     return board_io_mock_lock();
@@ -153,7 +158,7 @@ uint32_t board_io_lock (void)
 }
 
 /** @brief A driver-local compiler extension restores the CPU mask. */
-void board_io_unlock (uint32_t mask)
+void board_io_unlock(uint32_t mask)
 {
 #if BOARD_IO_HOST_TEST
     board_io_mock_unlock(mask);
@@ -163,14 +168,14 @@ void board_io_unlock (uint32_t mask)
 }
 
 /** @brief RP2040's raw timer wraps naturally after about 71 minutes. */
-uint32_t board_io_time_us (void)
+uint32_t board_io_time_us(void)
 {
     return read_reg(BOARD_TIMER + 0x28u);
 }
 
 /** @brief Kernel time avoids deriving milliseconds from a wrapping us timer.
  */
-uint32_t board_io_time_ms (void)
+uint32_t board_io_time_ms(void)
 {
     SYSTIM time = {0};
     (void)tk_get_tim(&time);
@@ -178,37 +183,37 @@ uint32_t board_io_time_ms (void)
 }
 
 /** @brief No ISR read-modify-write races with this coherent pair copy. */
-bool board_io_encoders (uint32_t * p_left, uint32_t * p_right)
+bool board_io_encoders(uint32_t * p_left, uint32_t * p_right)
 {
     uint32_t mask = board_io_lock();
     *p_left       = g_capture.left;
     *p_right      = g_capture.right;
-    bool b_valid = (!g_capture.b_left_encoder_fault) &&
-                   (!g_capture.b_right_encoder_fault);
+    bool b_valid  = (!g_capture.b_left_encoder_fault) &&
+                    (!g_capture.b_right_encoder_fault);
     board_io_unlock(mask);
     return b_valid;
 }
 
-uint8_t board_io_encoder_faults (void)
+uint8_t board_io_encoder_faults(void)
 {
-    uint32_t mask = board_io_lock();
-    uint8_t faults = (g_capture.b_left_encoder_fault ? 1u : 0u) |
-                     (g_capture.b_right_encoder_fault ? 2u : 0u);
+    uint32_t mask   = board_io_lock();
+    uint8_t  faults = (g_capture.b_left_encoder_fault ? 1u : 0u) |
+                      (g_capture.b_right_encoder_fault ? 2u : 0u);
     board_io_unlock(mask);
     return faults;
 }
 
 /** @brief Reset is acknowledged only with the safety latch still asserted. */
-void board_io_clear_fault (void)
+void board_io_clear_fault(void)
 {
-    uint32_t mask             = board_io_lock();
+    uint32_t mask                   = board_io_lock();
     g_capture.b_left_encoder_fault  = false;
     g_capture.b_right_encoder_fault = false;
     board_io_unlock(mask);
 }
 
 /** @brief Each wheel changes its two bridge channels in one register write. */
-void board_io_motor (int16_t left, int16_t right)
+void board_io_motor(int16_t left, int16_t right)
 {
     int32_t left_drive  = left * ROBOT_MOTOR_LEFT_SIGN;
     int32_t right_drive = right * ROBOT_MOTOR_RIGHT_SIGN;
@@ -230,7 +235,7 @@ void board_io_motor (int16_t left, int16_t right)
 }
 
 /** @brief Each ADC conversion has an independent 100-us deadline. */
-bool board_io_line (uint16_t * p_samples)
+bool board_io_line(uint16_t * p_samples)
 {
     bool b_valid = true;
 
@@ -257,7 +262,7 @@ bool board_io_line (uint16_t * p_samples)
  * Chip-specific setup lives in subsystem4/drv_lsm303.c, which identifies
  * LSM303DLHC or LSM303D at run time.
  */
-void board_io_i2c_init (void)
+void board_io_i2c_init(void)
 {
     write_reg(BOARD_I2C + 0x6cu, 0u);
     write_reg(BOARD_I2C, 0x65u);
@@ -269,11 +274,11 @@ void board_io_i2c_init (void)
 }
 
 /** @brief Register address, repeated start, then up to eight data reads. */
-bool board_io_i2c_read (uint8_t address, uint8_t reg, uint8_t * p_bytes,
-                        uint8_t length)
+bool board_io_i2c_read(uint8_t address, uint8_t reg, uint8_t * p_bytes,
+                       uint8_t length)
 {
-    bool b_valid = (NULL != p_bytes) && (length > 0u) &&
-                   (length <= BOARD_I2C_MAX_READ);
+    bool b_valid =
+        (NULL != p_bytes) && (length > 0u) && (length <= BOARD_I2C_MAX_READ);
 
     if (b_valid)
     {
@@ -285,14 +290,14 @@ bool board_io_i2c_read (uint8_t address, uint8_t reg, uint8_t * p_bytes,
 }
 
 /** @brief Register address and value in one transaction. */
-bool board_io_i2c_write (uint8_t address, uint8_t reg, uint8_t value)
+bool board_io_i2c_write(uint8_t address, uint8_t reg, uint8_t value)
 {
     i2c_target(address);
     return i2c_transfer(reg, value, NULL, 0u);
 }
 
 /** @brief 500..2500-us pulses map the configured 180-degree servo range. */
-void board_io_servo (uint8_t angle)
+void board_io_servo(uint8_t angle)
 {
     uint32_t bounded = (angle > 60u) ? 60u : angle;
     uint32_t pulse   = 500u + ((bounded * 2000u) / 60u);
@@ -300,23 +305,42 @@ void board_io_servo (uint8_t angle)
 }
 
 /** @brief Restore only ranging pins and capture; preserve encoder counts. */
-void board_io_range_reset (void)
+void board_io_range_reset(void)
 {
     uint32_t mask = board_io_lock();
     configure_pin(0u, 5u, true, false);
     configure_pin(1u, 5u, false, false);
     g_capture.echo_state = 0u;
     g_capture.echo_width = 0u;
-    g_capture.rise_us = 0u;
+    g_capture.rise_us    = 0u;
     write_reg(BOARD_IO + 0xf0u, 0xc0u);
     write_reg(BOARD_IO + 0x2100u, 0xc0u);
     board_io_unlock(mask);
 }
 
-/** @brief A short critical section guarantees both trigger edges. */
-void board_io_ping (void)
+/** @brief Full chip reboot, the same as unplugging and replugging: the
+ * power-on state machine resets every block except the two oscillators,
+ * then the watchdog fires at once. Scratch 4 is cleared so the boot ROM
+ * starts the flashed program normally. Never returns.
+ */
+void board_io_reboot(void)
 {
-    uint32_t mask = board_io_lock();
+    board_io_motor(0, 0);
+    (void)board_io_lock();
+    write_reg(BOARD_PSM + 0x08u, 0x0001fffcu);
+    write_reg(BOARD_WATCHDOG + 0x1cu, 0u);
+    write_reg(BOARD_WATCHDOG, 0x80000000u);
+
+    for (;;)
+    {
+        /* The watchdog reset arrives within a few microseconds. */
+    }
+}
+
+/** @brief A short critical section guarantees both trigger edges. */
+void board_io_ping(void)
+{
+    uint32_t mask        = board_io_lock();
     g_capture.echo_state = 0u;
     g_capture.echo_width = 0u;
     write_reg(BOARD_SIO + 0x18u, 1u);
@@ -330,7 +354,7 @@ void board_io_ping (void)
 }
 
 /** @brief Only the 2-us low and 12-us high trigger phases busy-wait. */
-static void trigger_delay (uint32_t duration_us)
+static void trigger_delay(uint32_t duration_us)
 {
     uint32_t start = board_io_time_us();
 
@@ -341,7 +365,7 @@ static void trigger_delay (uint32_t duration_us)
 }
 
 /** @brief Preserve short echoes as a 1-cm near-limit indication. */
-bool board_io_range (uint16_t * p_cm)
+bool board_io_range(uint16_t * p_cm)
 {
     uint32_t mask        = board_io_lock();
     uint32_t width       = g_capture.echo_width;
@@ -357,23 +381,23 @@ bool board_io_range (uint16_t * p_cm)
 }
 
 /** @brief Distinguish no rising edge, stuck-high echo and invalid width. */
-void board_io_range_diagnostics (board_io_range_diag_t * p_diag)
+void board_io_range_diagnostics(board_io_range_diag_t * p_diag)
 {
-    uint32_t mask = board_io_lock();
-    p_diag->state = (uint8_t)g_capture.echo_state;
-    p_diag->width_us = g_capture.echo_width;
-    p_diag->rises = g_capture.echo_rises;
-    p_diag->falls = g_capture.echo_falls;
-    p_diag->pins = (uint8_t)(read_reg(BOARD_SIO + 4u) & 3u);
+    uint32_t mask        = board_io_lock();
+    p_diag->state        = (uint8_t)g_capture.echo_state;
+    p_diag->width_us     = g_capture.echo_width;
+    p_diag->rises        = g_capture.echo_rises;
+    p_diag->falls        = g_capture.echo_falls;
+    p_diag->pins         = (uint8_t)(read_reg(BOARD_SIO + 4u) & 3u);
     p_diag->gpio_control = read_reg(BOARD_IO + 12u);
-    p_diag->gpio_pad = read_reg(BOARD_PADS + 8u);
-    p_diag->irq_raw = read_reg(BOARD_IO + 0xf0u) & 0xc0u;
-    p_diag->irq_enabled = read_reg(BOARD_IO + 0x100u) & 0xc0u;
+    p_diag->gpio_pad     = read_reg(BOARD_PADS + 8u);
+    p_diag->irq_raw      = read_reg(BOARD_IO + 0xf0u) & 0xc0u;
+    p_diag->irq_enabled  = read_reg(BOARD_IO + 0x100u) & 0xc0u;
     board_io_unlock(mask);
 }
 
 /** @brief Internal pull-ups let switches close directly to ground. */
-uint8_t board_io_buttons (void)
+uint8_t board_io_buttons(void)
 {
     uint32_t input = read_reg(BOARD_SIO + 4u);
     /* Pins 20..22 map to three individual active-low bits. */
@@ -381,13 +405,13 @@ uint8_t board_io_buttons (void)
 }
 
 /** @brief The scope captures actual loop starts without console jitter. */
-void board_io_trace (bool b_high)
+void board_io_trace(bool b_high)
 {
     write_reg(BOARD_SIO + (b_high ? 0x14u : 0x18u), 1u << ROBOT_TRACE_PIN);
 }
 
 /** @brief The RP2040 physical register addresses fit its 32-bit pointers. */
-static uint32_t read_reg (uint32_t address)
+static uint32_t read_reg(uint32_t address)
 {
     /* The address is an aligned peripheral register from the RP2040 map. */
 #if BOARD_IO_HOST_TEST
@@ -399,7 +423,7 @@ static uint32_t read_reg (uint32_t address)
 }
 
 /** @brief Only aligned, documented peripheral addresses reach this helper. */
-static void write_reg (uint32_t address, uint32_t value)
+static void write_reg(uint32_t address, uint32_t value)
 {
     /* The address is an aligned peripheral register from the RP2040 map. */
 #if BOARD_IO_HOST_TEST
@@ -411,7 +435,7 @@ static void write_reg (uint32_t address, uint32_t value)
 }
 
 /** @brief Configure mux, output enable and pad bias before use. */
-static void configure_pin (uint8_t pin, uint8_t function, bool b_output,
+static void configure_pin(uint8_t pin, uint8_t function, bool b_output,
                           bool b_pullup)
 {
     write_reg(BOARD_IO + 4u + (pin * 8u), function);
@@ -421,7 +445,7 @@ static void configure_pin (uint8_t pin, uint8_t function, bool b_output,
 }
 
 /** @brief Polling I2C is bounded and remains preemptible by control tasks. */
-static bool i2c_wait (uint32_t offset, uint32_t mask)
+static bool i2c_wait(uint32_t offset, uint32_t mask)
 {
     uint32_t start     = board_io_time_us();
     bool     b_aborted = false;
@@ -438,7 +462,7 @@ static bool i2c_wait (uint32_t offset, uint32_t mask)
 /** @brief IC_TAR may change only while the controller is disabled
  * (RP2040 datasheet 4.3; the Pico SDK does the same per transfer).
  */
-static void i2c_target (uint8_t address)
+static void i2c_target(uint8_t address)
 {
     write_reg(BOARD_I2C + 0x6cu, 0u);
     write_reg(BOARD_I2C + 4u, address);
@@ -447,7 +471,7 @@ static void i2c_target (uint8_t address)
 
 /** @brief Up to eight receive requests fit in the hardware's 16-entry FIFO.
  */
-static bool i2c_transfer (uint8_t reg, uint8_t value, uint8_t * p_bytes,
+static bool i2c_transfer(uint8_t reg, uint8_t value, uint8_t * p_bytes,
                          uint8_t length)
 {
     (void)read_reg(BOARD_I2C + 0x40u);
@@ -490,7 +514,7 @@ static bool i2c_transfer (uint8_t reg, uint8_t value, uint8_t * p_bytes,
 }
 
 /** @brief A quadrature transition supplies direction during braking too. */
-static void encoder_edge (uint32_t inputs, bool b_left)
+static void encoder_edge(uint32_t inputs, bool b_left)
 {
     uint32_t previous = b_left ? g_capture.last_left : g_capture.last_right;
     uint32_t current  = (inputs >> (b_left ? 4u : 16u)) & 3u;
@@ -523,7 +547,7 @@ static void encoder_edge (uint32_t inputs, bool b_left)
 }
 
 /** @brief T-Kernel's TA_HLNG wrapper supplies the actual ISR entry/exit. */
-static void board_gpio_isr (uint32_t number)
+static void board_gpio_isr(uint32_t number)
 {
     (void)number;
     uint32_t first  = read_reg(BOARD_IO + 0x120u);

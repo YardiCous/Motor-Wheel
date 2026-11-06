@@ -23,10 +23,15 @@
 #define ROBOT_ENCODER_EDGES_TURN 2400u
 #endif /* ROBOT_ENCODER_EDGES_TURN */
 
+#define ROBOT_REBOOT_HOLD_MS 3000u
+#define ROBOT_RANGE_POWER_UP_MS 1500u
+#define ROBOT_SERVO_SETTLE_MS 300u
+#define ROBOT_BARCODE_DRIVE_MM 400u
+#define ROBOT_BARCODE_DRIVE_MM_SECOND 50u
 /* Per-sensor black thresholds; each sensor reads white differently. */
 #define ROBOT_IR_THRESHOLD_LEFT 450u
 #define ROBOT_IR_THRESHOLD_CENTRE 300u
-#define ROBOT_IR_THRESHOLD_RIGHT ROBOT_IR_THRESHOLD
+#define ROBOT_IR_THRESHOLD_RIGHT 2100u
 /* Estimated from the turn tests (a 280 setting gave 90 degrees with the old
  * 960 scale, so 280 / 2.5 = 112). Replace with the measured wheel spacing. */
 #ifndef ROBOT_TRACK_MM
@@ -34,12 +39,14 @@
 #endif /* ROBOT_TRACK_MM */
 /* Calibrated wheel travel for a 90-degree turn: 103 * 90 / 95 = 98 mm. */
 #ifndef ROBOT_QUARTER_TURN_MM
-#define ROBOT_QUARTER_TURN_MM 98u
+#define ROBOT_QUARTER_TURN_MM 92u
 #endif /* ROBOT_QUARTER_TURN_MM */
 #define ROBOT_MOTOR_LEFT_SIGN 1
 #define ROBOT_MOTOR_RIGHT_SIGN 1
 /* Straight moves: correct 3 mm/s per mm of wheel-distance mismatch,
  * capped at 40 mm/s and half the commanded speed. */
+#define ROBOT_MOTOR_FF_OFFSET 250
+#define ROBOT_MOTOR_FF_GAIN 150
 #define ROBOT_STRAIGHT_GAIN 3
 #define ROBOT_STRAIGHT_CORRECTION_MAX 40
 /* Residual right drift: right wheel +0.5%, left -0.5% on straight moves.
@@ -59,14 +66,36 @@
 #define ROBOT_SCAN_MS 8000u
 #define ROBOT_MANOEUVRE_MS 10000u
 #define ROBOT_WARNING_MM 600u
-#define ROBOT_OBSTACLE_MM 300u
+#define ROBOT_OBSTACLE_MM 250u
 #define ROBOT_CLEARANCE_MM 120u
-/* Bypass: full measured width plus side margin, then detected front range.
- * Extra STEP_MS moves check obstacle depth before returning to the line. */
+/* Robot footprint. The IR sensors sit SENSOR_AHEAD in front of the wheel
+ * axle, which is the point the robot turns about. */
+#define ROBOT_WIDTH_MM 200u
+#define ROBOT_LENGTH_MM 300u
+#define ROBOT_SENSOR_AHEAD_MM 100u
+/* Wheel axle to the farthest corner: what the robot sweeps when it turns in
+ * place. 180 suits a 200 x 300 mm robot turning about its centre. */
+#define ROBOT_TURN_RADIUS_MM 180u
+/* Bypass: go sideways by the measured edge on the chosen side + half the
+ * robot + SIDE_MARGIN; first forward leg is the detection range + robot
+ * length; later legs are STEP_MS long; once a side-look is clear, one
+ * FWD_MARGIN move carries the robot's body past before a confirming look. */
 #define ROBOT_BYPASS_STEP_MS 2000u
-#define ROBOT_BYPASS_SIDE_MARGIN_MM 150u
-#define ROBOT_BYPASS_FWD_MARGIN_MM 200u
-/* Keep the sideways total, including its margin, within 12 bits. */
+#define ROBOT_BYPASS_SIDE_MARGIN_MM 50u
+#define ROBOT_BYPASS_FWD_MARGIN_MM ((ROBOT_WIDTH_MM / 2u) + 50u)
+/* Extra sideways step when the box is still ahead after the side move. */
+#define ROBOT_BYPASS_SIDE_EXTRA_MM 100u
+/* The return leg stops on the tape; this is how far past the expected line
+ * it may drive before giving up and sweeping for it. */
+#if OBSTACLE_NO_LINE
+/* No tape to stop on: return exactly the sideways distance, then carry on
+ * along the virtual line. */
+#define ROBOT_NO_LINE 1u
+#define ROBOT_BYPASS_BACK_EXTRA_MM 0u
+#else
+#define ROBOT_NO_LINE 0u
+#define ROBOT_BYPASS_BACK_EXTRA_MM 150u
+#endif /* OBSTACLE_NO_LINE */
 #if (OBSTACLE_TEST || LINE_TEST)
 #define ROBOT_BYPASS_MAX_STEPS 15u
 #else

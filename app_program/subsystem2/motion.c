@@ -27,10 +27,10 @@ _Static_assert((2u * (ROBOT_ENCODER_EDGES_TURN - 1u)) < 8192u,
 
 static int32_t limit(int32_t value, int32_t lower, int32_t upper);
 static int32_t straight_correction(motion_t * p_motion, int32_t left,
-                                    int32_t right);
-static void wheel_targets(motion_t * p_motion, int32_t left, int32_t right,
-                           int16_t line_error, int32_t * p_left,
-                           int32_t * p_right);
+                                   int32_t right);
+static void    wheel_targets(motion_t * p_motion, int32_t left, int32_t right,
+                             int16_t line_error, int32_t * p_left,
+                             int32_t * p_right);
 static int16_t smooth_pwm(int16_t requested, int32_t target, int16_t previous);
 static int16_t control_pwm(int32_t target, int32_t measured,
                            uint32_t * p_integral, uint32_t * p_previous,
@@ -123,32 +123,32 @@ bool motion_accept(motion_t * p_motion, uint32_t command)
 
     if (b_valid && (MOTION_IDLE == mode))
     {
-        p_motion->mode           = MOTION_IDLE;
-        p_motion->speed          = 0u;
+        p_motion->mode                 = MOTION_IDLE;
+        p_motion->speed                = 0u;
         p_motion->straight_error_edges = 0;
-        p_motion->integral_left  = MOTION_INTEGRAL_MAX;
-        p_motion->integral_right = MOTION_INTEGRAL_MAX;
-        p_motion->prior_left     = 1000u;
-        p_motion->prior_right    = 1000u;
+        p_motion->integral_left        = MOTION_INTEGRAL_MAX;
+        p_motion->integral_right       = MOTION_INTEGRAL_MAX;
+        p_motion->prior_left           = 1000u;
+        p_motion->prior_right          = 1000u;
     }
     else if (b_valid && b_available && (speed > 0u))
     {
-        p_motion->mode           = mode;
-        p_motion->speed          = speed;
-        p_motion->target_mm      = (command >> 2u) & 4095u;
-        p_motion->b_reverse      = (command >> 23u) & 1u;
-        p_motion->progress_um    = 0u;
+        p_motion->mode                 = mode;
+        p_motion->speed                = speed;
+        p_motion->target_mm            = (command >> 2u) & 4095u;
+        p_motion->b_reverse            = (command >> 23u) & 1u;
+        p_motion->progress_um          = 0u;
         p_motion->straight_error_edges = 0;
-        p_motion->elapsed_ms     = 0u;
-        p_motion->b_done         = false;
-        p_motion->b_stall        = false;
-        p_motion->b_timeout      = false;
-        p_motion->stall_left_ms  = 0u;
-        p_motion->stall_right_ms = 0u;
-        p_motion->integral_left  = MOTION_INTEGRAL_MAX;
-        p_motion->integral_right = MOTION_INTEGRAL_MAX;
-        p_motion->prior_left     = 1000u;
-        p_motion->prior_right    = 1000u;
+        p_motion->elapsed_ms           = 0u;
+        p_motion->b_done               = false;
+        p_motion->b_stall              = false;
+        p_motion->b_timeout            = false;
+        p_motion->stall_left_ms        = 0u;
+        p_motion->stall_right_ms       = 0u;
+        p_motion->integral_left        = MOTION_INTEGRAL_MAX;
+        p_motion->integral_right       = MOTION_INTEGRAL_MAX;
+        p_motion->prior_left           = 1000u;
+        p_motion->prior_right          = 1000u;
     }
     else
     {
@@ -213,10 +213,10 @@ void motion_step(motion_t * p_motion, uint32_t left, uint32_t right,
 
     if (b_active)
     {
-        int32_t target_left = 0;
+        int32_t target_left  = 0;
         int32_t target_right = 0;
-        wheel_targets(p_motion, left_edges, right_edges,
-                      line_error, &target_left, &target_right);
+        wheel_targets(p_motion, left_edges, right_edges, line_error,
+                      &target_left, &target_right);
         int32_t measured_left  = (left_edges * MOTION_SCALE) / MOTION_EDGES;
         int32_t measured_right = (right_edges * MOTION_SCALE) / MOTION_EDGES;
 
@@ -305,12 +305,12 @@ static int32_t limit(int32_t value, int32_t lower, int32_t upper)
 
 /** @brief Apply line steering, straight balancing or in-place turn signs. */
 static void wheel_targets(motion_t * p_motion, int32_t left, int32_t right,
-                           int16_t line_error, int32_t * p_left,
-                           int32_t * p_right)
+                          int16_t line_error, int32_t * p_left,
+                          int32_t * p_right)
 {
     /* Speed is 0..500 and encoder conversion stays below 1400 mm/s. */
-    int32_t target_left    = (int32_t)p_motion->speed;
-    int32_t target_right   = target_left;
+    int32_t target_left  = (int32_t)p_motion->speed;
+    int32_t target_right = target_left;
 
     if (p_motion->b_reverse)
     {
@@ -331,13 +331,12 @@ static void wheel_targets(motion_t * p_motion, int32_t left, int32_t right,
 
     if (MOTION_MOVE == p_motion->mode)
     {
-        int32_t correction =
-            straight_correction(p_motion, left, right);
-        target_left  = limit(target_left - correction, -500, 500);
-        target_right = limit(target_right + correction, -500, 500);
+        int32_t correction = straight_correction(p_motion, left, right);
+        target_left        = limit(target_left - correction, -500, 500);
+        target_right       = limit(target_right + correction, -500, 500);
     }
 
-    *p_left = target_left;
+    *p_left  = target_left;
     *p_right = target_right;
 }
 
@@ -346,10 +345,10 @@ static void wheel_targets(motion_t * p_motion, int32_t left, int32_t right,
  * accumulated heading error. Saturation bounds both the state and steering.
  */
 static int32_t straight_correction(motion_t * p_motion, int32_t left,
-                                    int32_t right)
+                                   int32_t right)
 {
     int32_t error = (int32_t)p_motion->straight_error_edges + left - right;
-    error = limit(error, -MOTION_EDGES, MOTION_EDGES);
+    error         = limit(error, -MOTION_EDGES, MOTION_EDGES);
     p_motion->straight_error_edges = (int16_t)error;
     /* Trim the desired distance ratio as well as speed, so the balancing
      * loop preserves the floor calibration instead of cancelling it.
@@ -357,16 +356,15 @@ static int32_t straight_correction(motion_t * p_motion, int32_t left,
      */
     int32_t direction = p_motion->b_reverse ? -1 : 1;
     int32_t trim_distance =
-        ((int32_t)p_motion->progress_um * ROBOT_STRAIGHT_TRIM_PERMILLE) /
-        5000;
-    int32_t error_cmm = ((error * MOTION_SCALE) / MOTION_EDGES) +
-                        (direction * trim_distance);
+        ((int32_t)p_motion->progress_um * ROBOT_STRAIGHT_TRIM_PERMILLE) / 5000;
+    int32_t error_cmm =
+        ((error * MOTION_SCALE) / MOTION_EDGES) + (direction * trim_distance);
     int32_t trim_speed =
         ((int32_t)p_motion->speed * ROBOT_STRAIGHT_TRIM_PERMILLE) / 1000;
-    int32_t correction = ((error_cmm * ROBOT_STRAIGHT_GAIN) / 100) +
-                         (direction * trim_speed);
+    int32_t correction =
+        ((error_cmm * ROBOT_STRAIGHT_GAIN) / 100) + (direction * trim_speed);
     int32_t maximum = (int32_t)p_motion->speed / 2;
-    maximum = limit(maximum, 0, ROBOT_STRAIGHT_CORRECTION_MAX);
+    maximum         = limit(maximum, 0, ROBOT_STRAIGHT_CORRECTION_MAX);
     return limit(correction, -maximum, maximum);
 }
 
@@ -440,7 +438,17 @@ static int16_t wheel_pid(int32_t target, int32_t measured,
     int32_t prior    = (int32_t)*p_previous - 1000;
     integral =
         limit(integral + error, -MOTION_INTEGRAL_MAX, MOTION_INTEGRAL_MAX);
-    int32_t output = target + error + (integral / 32) + ((error - prior) / 4);
+    /* Feed-forward: the duty that roughly holds this speed (static friction
+     * offset + duty per mm/s), so the integral only trims the remainder
+     * instead of slowly climbing from near zero on every command. */
+    int32_t magnitude = (target < 0) ? -target : target;
+    int32_t feedforward =
+        (0 == target) ? 0
+                      : ((int32_t)ROBOT_MOTOR_FF_OFFSET +
+                         ((magnitude * (int32_t)ROBOT_MOTOR_FF_GAIN) / 100));
+    feedforward = (target < 0) ? -feedforward : feedforward;
+    int32_t output =
+        feedforward + (2 * error) + (integral / 16) + ((error - prior) / 4);
     /* Both biased values are nonnegative and fit their packed widths. */
     *p_integral = (uint32_t)(integral + MOTION_INTEGRAL_MAX);
     *p_previous = (uint32_t)(error + 1000);
@@ -476,11 +484,22 @@ static void update_distance(motion_t * p_motion, int32_t left, int32_t right)
     p_motion->remainder   = (uint32_t)(residual + (MOTION_EDGES - 1));
     int32_t left_abs      = (left < 0) ? -left : left;
     int32_t right_abs     = (right < 0) ? -right : right;
-    /* The edge guard bounds this positive increment below 14000. */
-    int32_t  moved    = (left_abs + right_abs) * MOTION_HALF_CIRCUM;
-    uint32_t progress = (uint32_t)(moved / MOTION_EDGES);
-    progress += p_motion->progress_um;
-    p_motion->progress_um = (progress > 4095999u) ? 4095999u : progress;
+    /* The edge guard bounds this increment below 14000 either way. */
+    int32_t moved = (left_abs + right_abs) * MOTION_HALF_CIRCUM;
+
+    if (MOTION_TURN == p_motion->mode)
+    {
+        /* Count rotation only. Forward roll left over from the previous move
+         * turns both wheels the same way and cancels here, so it can no
+         * longer end a turn early. A right turn drives left forward. */
+        int32_t spin = p_motion->b_reverse ? (right - left) : (left - right);
+        moved        = spin * MOTION_HALF_CIRCUM;
+    }
+
+    int32_t progress = (int32_t)p_motion->progress_um + (moved / MOTION_EDGES);
+    progress         = (progress < 0) ? 0 : progress;
+    p_motion->progress_um =
+        (progress > 4095999) ? 4095999u : (uint32_t)progress;
 }
 
 /** @brief A stationary commanded wheel faults after the 200-ms window. */

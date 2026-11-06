@@ -56,6 +56,8 @@ bool board_io_i2c_write(uint8_t address, uint8_t reg, uint8_t value);
 void board_io_servo(uint8_t angle);
 /** @brief Reinitialise ranging GPIO and capture without resetting encoders. */
 void board_io_range_reset(void);
+/** @brief Reboot the whole RP2040 (like a power cycle); never returns. */
+void board_io_reboot(void);
 /** @brief Drive a 12-us trigger pulse with both edges in a critical section. */
 void board_io_ping(void);
 /** @brief Read captured range; 1 cm means below range, no echo is invalid. */

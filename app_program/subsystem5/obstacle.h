@@ -24,6 +24,11 @@
 #define OBSTACLE_REASON_INVALID 4u
 #define OBSTACLE_REASON_DEADLINE 5u
 #define OBSTACLE_REASON_NO_EDGES 6u
+/* The stopped scan accepts a front face up to 10 cm beyond the trigger
+ * distance: the robot may stop or the reading may wobble a little past it. */
+#define OBSTACLE_FRONT_MAX_MM (ROBOT_OBSTACLE_MM + 100u)
+/* Closer than this during a scan is the robot itself, not the course. */
+#define OBSTACLE_SELF_CM 10u
 
 
 /** @brief The servo angle is represented in three-degree units. */
@@ -42,6 +47,7 @@ typedef struct
     uint32_t scan_ms : 13;
     uint16_t scan_cm[OBSTACLE_SCAN_POINTS];
     uint16_t width_mm;
+    uint16_t side_mm;
     uint16_t left_cm;
     uint16_t right_cm;
     uint8_t reason;
@@ -66,6 +72,12 @@ uint16_t obstacle_range(const uint16_t * p_ranges, uint8_t echoes);
  * Returns zero when either edge or the front face cannot be established.
  */
 uint16_t obstacle_body_width(const uint16_t * p_ranges);
+/** @brief Sideways travel that puts the robot clear of an edge this far
+ * from its centre: edge + turning radius + the side margin.
+ */
+uint16_t obstacle_side_mm(uint32_t edge_mm);
+/** @brief True when lateral free space fits the robot after side travel. */
+bool obstacle_room(uint32_t lateral_mm, uint32_t side_mm);
 /** @brief Describe the scan rejection or wider-scan request. */
 const char * obstacle_reason_name(uint8_t reason);
 

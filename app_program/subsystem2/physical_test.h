@@ -9,11 +9,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/** @brief Calibration run: one step at a time, with encoder reports. */
 typedef struct
 {
     uint8_t  phase;
+    uint8_t  step;
     uint8_t  previous_buttons;
     uint32_t pause_until_ms;
+    uint32_t start_left;
+    uint32_t start_right;
+    uint32_t start_ms;
     bool     b_reported_ready;
 } physical_test_t;
 

@@ -85,6 +85,10 @@ Set a servo angle 0..60 in three-degree units.
 
 Reinitialise ranging GPIO and capture without resetting encoders.
 
+`void board_io_reboot(void);`
+
+Reboot the whole RP2040 (like a power cycle); never returns.
+
 `void board_io_ping(void);`
 
 Drive a 12-us trigger pulse with both edges in a critical section.
@@ -284,11 +288,82 @@ Return signed modulo-2^32 edge displacement, with an edge guard.
 
 `void physical_test_init(physical_test_t * p_test);`
 
-Initialize the test in a motor-off state.
+Calibration run: one step at a time, with encoder reports. */
+typedef struct
+{
+    uint8_t  phase;
+    uint8_t  step;
+    uint8_t  previous_buttons;
+    uint32_t pause_until_ms;
+    uint32_t start_left;
+    uint32_t start_right;
+    uint32_t start_ms;
+    bool     b_reported_ready;
+} physical_test_t;
+
+/** @brief Initialize the test in a motor-off state.
 
 `void physical_test_step(physical_test_t * p_test, motion_t * p_motion, int16_t * p_left_pwm, int16_t * p_right_pwm);`
 
 Run one 10-ms test cycle and return the requested PWM values.
+
+## app_program/subsystem3/barcode_test.h
+
+`void barcode_test_init(barcode_test_t * p_test, uint8_t phase);`
+
+One scan's bars and gaps, plus the live sensor statistics. */
+typedef struct
+{
+    uint16_t widths_ms[CODE39_MAX_ELEMENTS];
+    uint16_t widths_edges[CODE39_MAX_ELEMENTS];
+    uint32_t edge_ms;
+    uint32_t report_ms;
+    uint32_t last_left;
+    uint32_t last_right;
+    uint32_t scans;
+    uint32_t moved_edges;
+    uint32_t moving_ms;
+    uint32_t ignored;
+    uint16_t low;
+    uint16_t high;
+    uint16_t longest_ms;
+    uint8_t  count;
+    uint8_t  phase;
+    bool     b_black;
+    bool     b_scanning;
+    bool     b_overflow;
+} barcode_test_t;
+
+/** @brief Print the banner; phase 1 is raw capture, 2 adds decoding.
+
+`void barcode_test_step(barcode_test_t * p_test);`
+
+Take one GP28 sample; call every ROBOT_LINE_PERIOD_MS.
+
+## app_program/subsystem3/code39.h
+
+`void code39_decode(const uint16_t * p_widths, uint8_t count, code39_result_t * p_result);`
+
+Everything the bench needs to explain a pass or a failure. */
+typedef struct
+{
+    char     text[CODE39_MAX_TEXT + 1u];
+    uint8_t  length;
+    uint8_t  status;
+    uint8_t  bad_char;
+    uint16_t pattern;
+    uint16_t widest_narrow;
+    uint16_t narrowest_wide;
+    bool     b_reversed;
+    bool     b_partial;
+    char     letter;
+} code39_result_t;
+
+/** @brief Decode alternating bar/gap widths that start on a bar. Tries the forward reading first, then the reverse (robot travelling the other way). A count that is not 9, 19, 29... is a cut-short scan: its whole characters are still decoded and b_partial is set. letter is 'A'..'Z' for "*X*", "*X", "X*" or a lone X, otherwise '?'.
+
+`char code39_char(uint16_t pattern);`
+
+Map a 9-bit wide/narrow pattern (first element = bit 8) to its character, or return '\0' when no Code 39 character uses it.
 
 ## app_program/subsystem3/line.h
 
@@ -551,6 +626,7 @@ typedef struct
     uint32_t width_mm : 12;
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
+    bool b_line_seen : 1;
     bool b_body_scan : 1;
     uint32_t body_index : 4;
     uint32_t side_remaining_mm : 12;
@@ -572,6 +648,10 @@ Consume one barcode once, pre-empting line following.
 `bool navigation_obstacle_plan(navigation_t * p_navigation, uint16_t width_mm, uint16_t left_cm, uint16_t right_cm);`
 
 Accept a bounded width and side clearances for a pending bypass.
+
+`bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm, uint16_t side_mm, bool b_left);`
+
+Accept the servo scan's chosen side and sideways distance.
 
 `bool navigation_body_scan(navigation_t * p_navigation);`
 
@@ -601,6 +681,7 @@ typedef struct
     uint32_t scan_ms : 13;
     uint16_t scan_cm[OBSTACLE_SCAN_POINTS];
     uint16_t width_mm;
+    uint16_t side_mm;
     uint16_t left_cm;
     uint16_t right_cm;
     uint8_t reason;
@@ -632,9 +713,23 @@ Combine zero to three echoes; no echo reports the maximum range.
 
 Estimate width from body headings -90..90 in 15-degree steps. Returns zero when either edge or the front face cannot be established.
 
+`uint16_t obstacle_side_mm(uint32_t edge_mm);`
+
+Sideways travel that puts the robot clear of an edge this far from its centre: edge + turning radius + the side margin.
+
+`bool obstacle_room(uint32_t lateral_mm, uint32_t side_mm);`
+
+True when lateral free space fits the robot after side travel.
+
 `const char * obstacle_reason_name(uint8_t reason);`
 
 Describe the scan rejection or wider-scan request.
+
+## testing/host/code39_host.h
+
+`int main(void);`
+
+Decode synthetic barcodes: letters, reversal, drift and faults.
 
 ## testing/host/motor_test.h
 

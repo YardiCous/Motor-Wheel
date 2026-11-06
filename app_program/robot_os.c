@@ -19,6 +19,10 @@
 #include "subsystem2/encoder_test.h"
 #endif /* ENCODER_TEST */
 #include "subsystem3/line.h"
+#if BARCODE_TEST
+#include "subsystem3/barcode_test.h"
+#include <tm/tmonitor.h>
+#endif /* BARCODE_TEST */
 #include "subsystem4/drv_lsm303.h"
 #include "subsystem4/safety.h"
 #include "subsystem4/terrain.h"
@@ -97,12 +101,23 @@ typedef struct
     uint16_t faults;
     bool     b_avoided;
     uint32_t report_at_ms;
+    /* Encoder log for each move and turn the bypass issues. */
+    uint32_t start_left;
+    uint32_t start_right;
+    uint32_t start_ms;
+    uint32_t settle_ms;
+    uint16_t target_mm;
+    uint8_t  mode;
+    bool     b_reverse;
+    bool     b_active;
+    bool     b_settling;
 } bench_t;
 #endif /* OBSTACLE_TEST */
 
 static volatile cyclic_t g_clock = {0};
-#if ((!MOTOR_TEST) && (!ENCODER_TEST))
-static buttons_t g_buttons = {0};
+#if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!BARCODE_TEST))
+static buttons_t g_buttons        = {0};
+static uint32_t  g_reset_since_ms = 0u;
 #endif /* MOTOR_TEST && ENCODER_TEST */
 static volatile shared_t g_shared                               = {0};
 static volatile uint8_t  g_packet[DATA_FORMATS_TELEMETRY_BYTES] = {0u};
@@ -116,9 +131,8 @@ static ID                gh_command_queue                       = 0;
 static ID                gh_telemetry_queue                     = 0;
 static ID                gh_echo_flag                           = 0;
 static ID                gh_ack_queue                           = 0;
-static uint16_t g_scan_width_mm = 0u;
-static uint16_t g_scan_left_cm = 0u;
-static uint16_t g_scan_right_cm = 0u;
+static uint16_t          g_scan_width_mm                        = 0u;
+static uint16_t          g_scan_side_mm                         = 0u;
 static ID                gh_cyclic                              = 0;
 
 static uint32_t field_read(uint16_t offset, uint8_t width);
@@ -141,10 +155,24 @@ static void     telemetry_task(INT start, void * p_argument);
 static void motion_cycle(motion_t * p_motion);
 static bool wheel_speeds(int32_t edges_left, int32_t edges_right);
 #endif /* MOTOR_TEST && ENCODER_TEST */
+#if ((!BARCODE_TEST) && (!OBSTACLE_NO_LINE))
 static void line_cycle(line_t * p_line);
+#endif /* BARCODE_TEST */
+#if OBSTACLE_NO_LINE
+static void line_virtual(void);
+#endif /* OBSTACLE_NO_LINE */
+#if BARCODE_TEST
+static void barcode_drive(void);
+static void barcode_reset(void);
+#endif /* BARCODE_TEST */
 #if OBSTACLE_TEST
 static void bench_init(bench_t * p_bench);
 static void bench_step(navigation_t * p_navigation, bench_t * p_bench);
+static void bench_encoders(const navigation_t * p_navigation,
+                           bench_t *            p_bench);
+static void bench_report(const bench_t * p_bench, const char * p_when);
+static void bench_look(const navigation_t * p_navigation, uint8_t before,
+                       uint8_t after);
 #endif /* OBSTACLE_TEST */
 #if ((!OBSTACLE_TEST) && (!LINE_TEST))
 static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
@@ -156,19 +184,19 @@ static void terrain_stub(void);
 static void line_report_init(void);
 static void line_report(void);
 #endif /* LINE_TEST */
-#if ((!MOTOR_TEST) && (!ENCODER_TEST))
+#if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!BARCODE_TEST))
 static void navigation_cycle(navigation_t * p_navigation);
 static void local_commands(navigation_t * p_navigation);
 static void local_command(navigation_t * p_navigation, uint8_t command,
-                           bool b_latched);
+                          bool b_latched);
 static void remote_commands(navigation_t * p_navigation);
 static void dispatch_navigation(navigation_t * p_navigation);
 #endif /* MOTOR_TEST && ENCODER_TEST */
 #if !LINE_TEST
-static void report_scan_result(const obstacle_t * p_obstacle);
-static void     obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle);
-static bool     range_sample(uint16_t * p_range);
-static uint8_t  read_pings(uint16_t * p_ranges);
+static void    report_scan_result(const obstacle_t * p_obstacle);
+static void    obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle);
+static bool    range_sample(uint16_t * p_range);
+static uint8_t read_pings(uint16_t * p_ranges);
 #endif /* LINE_TEST */
 static uint16_t current_faults(void);
 
@@ -521,6 +549,29 @@ static void line_task(INT start, void * p_argument)
 {
     (void)start;
     (void)p_argument;
+#if BARCODE_TEST
+    /* Motors stay off: navigation is idle, so Motion receives no command. */
+    barcode_test_t bench = {0};
+    barcode_test_init(&bench, (uint8_t)BARCODE_TEST);
+
+    for (;;)
+    {
+        wait_release();
+        barcode_test_step(&bench);
+        /* The bench owns the IR sensors here, so report them ready; the
+         * safety task otherwise holds a start-up fault that blocks Motion. */
+        uint32_t mask         = board_io_lock();
+        g_shared.b_line_ready = true;
+        board_io_unlock(mask);
+        heartbeat(1u);
+    }
+#elif OBSTACLE_NO_LINE
+    for (;;)
+    {
+        wait_release();
+        line_virtual();
+    }
+#else
     line_t detector = {0};
     line_init(&detector);
 
@@ -529,6 +580,7 @@ static void line_task(INT start, void * p_argument)
         wait_release();
         line_cycle(&detector);
     }
+#endif /* BARCODE_TEST */
 }
 
 /** @brief I2C failure recovery never blocks startup on WiFi. */
@@ -543,8 +595,8 @@ static void terrain_task(INT start, void * p_argument)
         terrain_stub();
     }
 #else
-    terrain_t detector = {0};
-    drv_lsm303_t imu = {0};
+    terrain_t    detector = {0};
+    drv_lsm303_t imu      = {0};
     terrain_init(&detector);
     bool b_configured = false;
 
@@ -565,6 +617,31 @@ static void navigation_task(INT start, void * p_argument)
     for (;;)
     {
         wait_release();
+        heartbeat(3u);
+    }
+#elif BARCODE_TEST
+    /* START drives the robot straight over the barcode, then it stops. */
+    uint8_t previous = board_io_buttons();
+
+    for (;;)
+    {
+        wait_release();
+        uint8_t buttons = board_io_buttons();
+
+        if ((0u != (buttons & 1u)) && (0u == (previous & 1u)))
+        {
+            barcode_drive();
+        }
+        else if ((0u != (buttons & 4u)) && (0u == (previous & 4u)))
+        {
+            barcode_reset();
+        }
+        else
+        {
+            /* No new button press. */
+        }
+
+        previous = buttons;
         heartbeat(3u);
     }
 #elif ENCODER_TEST
@@ -618,6 +695,29 @@ static void obstacle_task(INT start, void * p_argument)
         (void)tk_dly_tsk(ROBOT_RANGE_PERIOD_MS);
     }
 #else
+    /* The ultrasonic can start up stuck hearing its own transmit ringing
+     * (a 50-60 us echo, read as 1 cm) until its next power cycle. Give it a
+     * quiet start: no pings and no servo surge until it has settled. */
+    for (uint32_t waited = 0u; waited < ROBOT_RANGE_POWER_UP_MS;
+         waited += ROBOT_RANGE_PERIOD_MS)
+    {
+        fault_source(ROBOT_SOURCE_SCAN, 0u);
+        heartbeat(4u);
+        (void)tk_dly_tsk(ROBOT_RANGE_PERIOD_MS);
+    }
+
+    /* Board start-up leaves the servo unpowered; centre it now, still
+     * reporting in so the safety watchdog sees this task is alive. */
+    board_io_servo(30u);
+
+    for (uint32_t waited = 0u; waited < ROBOT_SERVO_SETTLE_MS;
+         waited += ROBOT_RANGE_PERIOD_MS)
+    {
+        fault_source(ROBOT_SOURCE_SCAN, 0u);
+        heartbeat(4u);
+        (void)tk_dly_tsk(ROBOT_RANGE_PERIOD_MS);
+    }
+
     obstacle_t scanner = {0};
     obstacle_init(&scanner);
     uint8_t last_angle = 30u;
@@ -783,6 +883,73 @@ static bool wheel_speeds(int32_t edges_left, int32_t edges_right)
 
 #endif /* MOTOR_TEST && ENCODER_TEST */
 
+#if BARCODE_TEST
+/** @brief One straight, slow, encoder-controlled run of
+ * ROBOT_BARCODE_DRIVE_MM; Motion stops by itself at the end. Slow keeps
+ * each bar several samples wide; the wheels turning lets the bench measure
+ * bars by distance rather than time.
+ */
+static void barcode_drive(void)
+{
+    uint32_t command    = 0u;
+    uint8_t  message[3] = {0u};
+    uint32_t mask       = board_io_lock();
+    bool     b_latched  = g_shared.b_latched;
+    board_io_unlock(mask);
+
+    if (b_latched)
+    {
+        tm_printf((UB *)"BARCODE: START ignored, fault 0x%03x latched: press "
+                        "RESET (GP22) first\n",
+                  (unsigned)field_read(37u, 12u));
+        return;
+    }
+
+    (void)motion_forward(&command, ROBOT_BARCODE_DRIVE_MM,
+                         ROBOT_BARCODE_DRIVE_MM_SECOND);
+    (void)data_formats_write(message, 0u, 24u, command);
+    ER result = tk_snd_mbf(gh_motion_queue, message, 3, TMO_POL);
+    tm_printf((UB *)"BARCODE: START -> driving %u mm at %u mm/s%s\n",
+              (unsigned)ROBOT_BARCODE_DRIVE_MM,
+              (unsigned)ROBOT_BARCODE_DRIVE_MM_SECOND,
+              (UB *)((E_OK == result) ? "" : " (queue full)"));
+}
+
+/** @brief RESET clears latched faults, as in the full robot build. */
+static void barcode_reset(void)
+{
+    uint32_t mask           = board_io_lock();
+    g_shared.b_reset        = true;
+    g_shared.b_reset_motion = true;
+    g_shared.b_queue_fault  = false;
+    g_shared.b_range_fault  = false;
+    g_shared.reset_at_ms    = board_io_time_ms();
+    board_io_unlock(mask);
+    tm_printf((UB *)"BARCODE: RESET\n");
+}
+#endif /* BARCODE_TEST */
+
+#if OBSTACLE_NO_LINE
+/** @brief A straight, always-centred virtual line for floors without tape.
+ * It vanishes during the bypass, so the return leg runs its full distance.
+ */
+static void line_virtual(void)
+{
+    uint32_t vehicle  = field_read(2u, 3u);
+    bool     b_bypass = (DATA_FORMATS_AVOID == vehicle);
+    /* 127 is zero steering error in the offset-binary field. */
+    field_write(121u, 8u, 127u);
+    field_write(129u, 3u, LINE_TRACKING);
+    uint32_t mask           = board_io_lock();
+    g_shared.b_line_ready   = true;
+    g_shared.b_line_visible = !b_bypass;
+    g_shared.b_line_lost    = false;
+    board_io_unlock(mask);
+    heartbeat(1u);
+}
+
+#endif /* OBSTACLE_NO_LINE */
+#if ((!BARCODE_TEST) && (!OBSTACLE_NO_LINE))
 /** @brief Line errors and full-resolution sensor samples have one writer. */
 static void line_cycle(line_t * p_line)
 {
@@ -828,6 +995,7 @@ static void line_cycle(line_t * p_line)
     board_io_unlock(mask);
     heartbeat(1u);
 }
+#endif /* BARCODE_TEST */
 
 #if ((!OBSTACLE_TEST) && (!LINE_TEST))
 /** @brief Failed or aged data invalidates height instead of inventing a
@@ -857,14 +1025,13 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
     input.b_imu_ok =
         (*pb_configured) && (drv_lsm303_accel(p_imu, NULL, input.accel_mg));
     input.b_motion_fresh = (board_io_time_ms() - motion_time) <= 20u;
-    uint32_t snapshot = field_read(5u, 32u);
+    uint32_t snapshot    = field_read(5u, 32u);
     /* The nine-bit speed has maximum magnitude 511. */
-    int16_t speed = (int16_t)((snapshot >> 12u) & 511u);
-    speed         = (0u != (snapshot & (1u << 21u))) ? -speed : speed;
-    input.speed_mm_s = speed;
+    int16_t speed     = (int16_t)((snapshot >> 12u) & 511u);
+    speed             = (0u != (snapshot & (1u << 21u))) ? -speed : speed;
+    input.speed_mm_s  = speed;
     input.distance_mm = snapshot & 4095u;
-    input.left_mm_s =
-        (int16_t)data_formats_unsign(field_read(203u, 10u), 10u);
+    input.left_mm_s = (int16_t)data_formats_unsign(field_read(203u, 10u), 10u);
     input.right_mm_s =
         (int16_t)data_formats_unsign(field_read(213u, 10u), 10u);
     terrain_step(p_terrain, &input);
@@ -906,7 +1073,7 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
 }
 #endif /* OBSTACLE_TEST || LINE_TEST */
 
-#if ((!MOTOR_TEST) && (!ENCODER_TEST))
+#if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!BARCODE_TEST))
 /** @brief Latest line data is combined with consumptive motion events. */
 static void navigation_cycle(navigation_t * p_navigation)
 {
@@ -940,17 +1107,16 @@ static void navigation_cycle(navigation_t * p_navigation)
         (void)navigation_body_scan(p_navigation);
     }
 
-    bool     b_scan_left    = (field_read(112u, 6u) < 30u);
+    bool b_scan_left = (field_read(112u, 6u) < 30u);
     if (b_scan_ready && (DATA_FORMATS_AVOID == p_navigation->state) &&
-        (0u == p_navigation->stage) && (0u == p_navigation->width_mm))
+        (0u == p_navigation->stage) && (0u == p_navigation->side_mm))
     {
-        mask = board_io_lock();
+        mask           = board_io_lock();
         uint16_t width = g_scan_width_mm;
-        uint16_t left = g_scan_left_cm;
-        uint16_t right = g_scan_right_cm;
+        uint16_t side  = g_scan_side_mm;
         board_io_unlock(mask);
-        bool b_plan = navigation_obstacle_plan(p_navigation, width,
-                                               left, right);
+        bool b_plan =
+            navigation_obstacle_route(p_navigation, width, side, b_scan_left);
         p_navigation->b_fault = (p_navigation->b_fault) || (!b_plan);
     }
 
@@ -979,10 +1145,26 @@ static void navigation_cycle(navigation_t * p_navigation)
     }
 }
 
-/** @brief Local switches must remain stable for three 10-ms samples. */
+/** @brief Local switches must remain stable for three 10-ms samples.
+ * Holding RESET for ROBOT_REBOOT_HOLD_MS reboots the whole board, which
+ * recovers anything a normal RESET cannot, without reflashing.
+ */
 static void local_commands(navigation_t * p_navigation)
 {
-    uint8_t buttons = board_io_buttons();
+    uint8_t  buttons = board_io_buttons();
+    uint32_t now     = board_io_time_ms();
+    g_reset_since_ms = (0u == (buttons & 4u))     ? 0u
+                       : (0u == g_reset_since_ms) ? now
+                                                  : g_reset_since_ms;
+
+    if ((0u != g_reset_since_ms) &&
+        ((now - g_reset_since_ms) >= ROBOT_REBOOT_HOLD_MS))
+    {
+#if (OBSTACLE_TEST || LINE_TEST)
+        tm_printf((UB *)"RESET held: rebooting the board\n");
+#endif /* OBSTACLE_TEST || LINE_TEST */
+        board_io_reboot();
+    }
 
     if (0u != (buttons & 2u))
     {
@@ -1024,12 +1206,12 @@ static void local_commands(navigation_t * p_navigation)
 
 /** @brief Report local command acceptance without changing safety policy. */
 static void local_command(navigation_t * p_navigation, uint8_t command,
-                           bool b_latched)
+                          bool b_latched)
 {
     bool b_accepted = navigation_supervise(p_navigation, command, b_latched);
 #if OBSTACLE_TEST
     const char * p_name = (DATA_FORMATS_START == command) ? "START" : "RESET";
-    p_name = (DATA_FORMATS_ESTOP == command) ? "ESTOP" : p_name;
+    p_name              = (DATA_FORMATS_ESTOP == command) ? "ESTOP" : p_name;
     tm_printf((UB *)"CONTROL: %s %s nav=%u latched=%u faults=0x%03x\n",
               (UB *)p_name, (UB *)(b_accepted ? "accepted" : "rejected"),
               (unsigned)p_navigation->state, b_latched ? 1u : 0u,
@@ -1217,25 +1399,34 @@ static void line_report(void)
 /** @brief Console text is only printed when something changes. */
 static void bench_init(bench_t * p_bench)
 {
-    p_bench->state     = 0u;
-    p_bench->stage     = 0u;
-    p_bench->look      = 0u;
-    p_bench->faults    = 0u;
-    p_bench->b_avoided = false;
+    p_bench->state        = 0u;
+    p_bench->stage        = 0u;
+    p_bench->look         = 0u;
+    p_bench->faults       = 0u;
+    p_bench->b_avoided    = false;
     p_bench->report_at_ms = board_io_time_ms();
-    tm_printf((UB *)"OBSTACLE TEST: line tracking + bypass, START (GP20)\n");
+    tm_printf((UB *)"OBSTACLE TEST: %s + bypass, START (GP20)\n",
+              (UB *)((0u != ROBOT_NO_LINE) ? "NO LINE (drives straight)"
+                                           : "line tracking"));
     tm_printf((UB *)"OBSTACLE TEST: E-stop is GP21, RESET is GP22\n");
     tm_printf((UB *)"OBSTACLE TEST: scan 0 idle 1 coarse 2 fine 3 plan\n");
     tm_printf((UB *)"OBSTACLE TEST: scan 4 bypass 5 recover 6 abort 7 body\n");
-    tm_printf((UB *)"BYPASS: 1 turn 90, 2 measured width, 3 turn back 90\n");
-    tm_printf((UB *)"BYPASS: 6 detected distance, 7 face line, 8 look\n");
-    tm_printf((UB *)"BYPASS: 9 turn out, 10 back to line, 11 turn out\n");
-    tm_printf((UB *)"BYPASS: blocked -> turn back 90, move %u mm, recheck\n",
-              (unsigned)((ROBOT_TURN_MM_SECOND * ROBOT_BYPASS_STEP_MS) /
-                         1000u));
+    tm_printf((UB *)"BYPASS: 1 turn out, 2 side move, 3 face ahead, "
+                    "4 check ahead, 5 turn out again\n");
+    tm_printf((UB *)"BYPASS: 6 fwd move, 7 face line, 8 look, "
+                    "9 face ahead\n");
+    tm_printf((UB *)"BYPASS: 10 back to tape, 11 onto line, 12 face ahead\n");
+    tm_printf(
+        (UB *)"BYPASS: fwd step %u mm, margin %u mm, robot %ux%u mm\n",
+        (unsigned)((ROBOT_TURN_MM_SECOND * ROBOT_BYPASS_STEP_MS) / 1000u),
+        (unsigned)ROBOT_BYPASS_FWD_MARGIN_MM, (unsigned)ROBOT_WIDTH_MM,
+        (unsigned)ROBOT_LENGTH_MM);
+    tm_printf((UB *)"ENC: each move/turn prints wheel edges at its end "
+                    "(and 0.5 s later if it waited)\n");
     tm_printf((UB *)"FAULT BITS: 001 stall 002 encoder 004 imu 008 noecho\n");
     tm_printf((UB *)"FAULT BITS: 020 impact 040 estop/close 080 watchdog\n");
-    tm_printf((UB *)"FAULT BITS: 100 range 200 scan/path/deadline 400 queue\n");
+    tm_printf(
+        (UB *)"FAULT BITS: 100 range 200 scan/path/deadline 400 queue\n");
 }
 
 /** @brief Report progress as bypass recovery resumes line tracking. */
@@ -1243,10 +1434,10 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
 {
     static const char * const g_names[8] = {
         "?", "IDLE", "FOLLOW", "BARCODE", "HUMP", "AVOID", "SEARCH", "FAULT"};
-    uint8_t state = (uint8_t)p_navigation->state;
-    uint8_t stage = (uint8_t)p_navigation->stage;
-    uint32_t now = board_io_time_ms();
-    bool    b_changed =
+    uint8_t  state = (uint8_t)p_navigation->state;
+    uint8_t  stage = (uint8_t)p_navigation->stage;
+    uint32_t now   = board_io_time_ms();
+    bool     b_changed =
         (state != p_bench->state) ||
         ((DATA_FORMATS_AVOID == state) && (stage != p_bench->stage));
 
@@ -1271,12 +1462,12 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
 
     if (b_changed || ((now - p_bench->report_at_ms) >= 1000u))
     {
-        p_bench->report_at_ms = now;
-        uint32_t mask = board_io_lock();
-        bool b_latched = g_shared.b_latched;
-        bool b_line_ready = g_shared.b_line_ready;
-        bool b_imu_ready = g_shared.b_imu_ready;
-        bool b_reset = g_shared.b_reset;
+        p_bench->report_at_ms           = now;
+        uint32_t mask                   = board_io_lock();
+        bool     b_latched              = g_shared.b_latched;
+        bool     b_line_ready           = g_shared.b_line_ready;
+        bool     b_imu_ready            = g_shared.b_imu_ready;
+        bool     b_reset                = g_shared.b_reset;
         uint32_t ages[ROBOT_HEARTBEATS] = {0u};
 
         for (uint8_t source = 0u; source < ROBOT_HEARTBEATS; ++source)
@@ -1327,6 +1518,7 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
         p_bench->faults = faults;
     }
 
+    bench_encoders(p_navigation, p_bench);
     p_bench->b_avoided = (p_bench->b_avoided) || (DATA_FORMATS_AVOID == state);
 
     if ((p_bench->b_avoided) && (DATA_FORMATS_FOLLOW == state))
@@ -1337,6 +1529,130 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
 
     p_bench->state = state;
     p_bench->stage = stage;
+}
+
+/** @brief Explain each look's decision as it is made: the reading, the
+ * distance under which it counts as the box, and what happens next. Stage 4
+ * looks straight ahead after a side move; stage 8 looks at the box side.
+ */
+static void bench_look(const navigation_t * p_navigation, uint8_t before,
+                       uint8_t after)
+{
+    unsigned range = (unsigned)field_read(103u, 9u);
+
+    if ((4u == before) && (4u != after))
+    {
+        tm_printf((UB *)"CHECK AHEAD: %u cm (box if < %u) -> %s, side now "
+                        "%u mm\n",
+                  range, (unsigned)((p_navigation->detected_mm / 10u) + 20u),
+                  (UB *)((6u == after) ? "clear, going forward"
+                                       : "box still ahead, step out more"),
+                  (unsigned)p_navigation->side_mm);
+    }
+    else if ((8u == before) && (8u != after))
+    {
+        const char * p_result = (10u == after) ? "clear twice, going back"
+                                : (p_navigation->b_margin)
+                                    ? "clear once, one more step to confirm"
+                                    : "box still beside, step forward";
+        tm_printf((UB *)"LOOK AT BOX: %u cm (box if < %u) -> %s, misses=%u\n",
+                  range, (unsigned)((p_navigation->side_mm / 10u) + 20u),
+                  (UB *)p_result, (unsigned)p_navigation->steps);
+    }
+    else
+    {
+        /* Not leaving a look stage. */
+    }
+}
+
+/** @brief Snapshot the encoders when Motion starts a move or turn, and
+ * report when it stops and again once the robot has coasted to rest.
+ */
+static void bench_encoders(const navigation_t * p_navigation,
+                           bench_t *            p_bench)
+{
+    bench_look(p_navigation, p_bench->stage, (uint8_t)p_navigation->stage);
+    uint32_t snapshot    = field_read(5u, 32u);
+    uint8_t  mode        = (uint8_t)((snapshot >> 22u) & 7u);
+    bool     b_manoeuvre = (MOTION_MOVE == mode) || (MOTION_TURN == mode);
+    uint32_t now         = board_io_time_ms();
+
+    if (b_manoeuvre && (!p_bench->b_active))
+    {
+        uint32_t left  = 0u;
+        uint32_t right = 0u;
+        (void)board_io_encoders(&left, &right);
+        p_bench->start_left  = left;
+        p_bench->start_right = right;
+        p_bench->start_ms    = now;
+        p_bench->target_mm = (uint16_t)((p_navigation->command >> 2u) & 4095u);
+        p_bench->b_reverse = (0u != ((p_navigation->command >> 23u) & 1u));
+        p_bench->mode      = mode;
+        p_bench->b_active  = true;
+        p_bench->b_settling = false;
+    }
+    else if ((!b_manoeuvre) && (p_bench->b_active))
+    {
+        bench_report(p_bench, "end");
+        p_bench->settle_ms  = now;
+        p_bench->b_active   = false;
+        p_bench->b_settling = true;
+    }
+    else if ((p_bench->b_settling) && ((now - p_bench->settle_ms) >= 500u))
+    {
+        /* Only printed if the next command waited: shows the coasting. */
+        bench_report(p_bench, "rest");
+        p_bench->b_settling = false;
+    }
+    else
+    {
+        /* Nothing new to report. */
+    }
+}
+
+/** @brief Wheel edges since the start, as distance or as a turn angle. */
+static void bench_report(const bench_t * p_bench, const char * p_when)
+{
+    uint32_t left  = 0u;
+    uint32_t right = 0u;
+    (void)board_io_encoders(&left, &right);
+    int32_t  edges_left  = (int32_t)(left - p_bench->start_left);
+    int32_t  edges_right = (int32_t)(right - p_bench->start_right);
+    uint32_t abs_left =
+        (edges_left < 0) ? (uint32_t)(-edges_left) : (uint32_t)edges_left;
+    uint32_t abs_right =
+        (edges_right < 0) ? (uint32_t)(-edges_right) : (uint32_t)edges_right;
+    /* Mean wheel travel in micrometres; 64-bit keeps long moves exact. */
+    uint64_t travel_um =
+        ((uint64_t)(abs_left + abs_right) * ROBOT_WHEEL_CIRCUM_UM) /
+        (2u * (uint64_t)ROBOT_ENCODER_EDGES_TURN);
+    uint32_t target =
+        ((uint32_t)p_bench->target_mm * ROBOT_ENCODER_EDGES_TURN * 1000u) /
+        ROBOT_WHEEL_CIRCUM_UM;
+    uint32_t ms = board_io_time_ms() - p_bench->start_ms;
+
+    if (MOTION_TURN == p_bench->mode)
+    {
+        /* Relative to the calibrated quarter turn, in tenths of a degree:
+         * travel equal to ROBOT_QUARTER_TURN_MM reads 90.0. */
+        uint64_t tenths =
+            (travel_um * 900u) / ((uint64_t)ROBOT_QUARTER_TURN_MM * 1000u);
+        tm_printf((UB *)"ENC turn %s %s: L=%d R=%d edges (target %u each) "
+                        "= %u.%u deg, %u ms\n",
+                  (UB *)(p_bench->b_reverse ? "LEFT" : "RIGHT"), (UB *)p_when,
+                  (int)edges_left, (int)edges_right, (unsigned)target,
+                  (unsigned)(tenths / 10u), (unsigned)(tenths % 10u),
+                  (unsigned)ms);
+    }
+    else
+    {
+        tm_printf((UB *)"ENC move %s %s: L=%d R=%d edges (target %u each) "
+                        "= %u mm, L-R %d edges, %u ms\n",
+                  (UB *)(p_bench->b_reverse ? "BACK" : "FWD"), (UB *)p_when,
+                  (int)edges_left, (int)edges_right, (unsigned)target,
+                  (unsigned)(travel_um / 1000u),
+                  (int)(edges_left - edges_right), (unsigned)ms);
+    }
 }
 #endif /* OBSTACLE_TEST */
 
@@ -1403,8 +1719,8 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     uint8_t  echoes         = read_pings(ranges);
 
     /* No echo is the sensor's out-of-range result, not zero distance. */
-    uint16_t range = obstacle_range(ranges, echoes);
-    bool b_forward = (30u == measured_angle);
+    uint16_t range          = obstacle_range(ranges, echoes);
+    bool     b_forward      = (30u == measured_angle);
     uint32_t previous_state = p_obstacle->state;
     obstacle_sample(p_obstacle, range, true);
 #if OBSTACLE_TEST
@@ -1419,18 +1735,23 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     {
         report_scan_result(p_obstacle);
     }
-    uint32_t state     = p_obstacle->state;
-    mask = board_io_lock();
+    uint32_t state  = p_obstacle->state;
+    mask            = board_io_lock();
     g_scan_width_mm = p_obstacle->width_mm;
-    g_scan_left_cm = p_obstacle->left_cm;
-    g_scan_right_cm = p_obstacle->right_cm;
+    g_scan_side_mm  = p_obstacle->side_mm;
     board_io_unlock(mask);
     field_write(103u, 9u, b_forward ? range : 0u);
     field_write(112u, 6u,
                 (OBSTACLE_PLAN == state) ? p_obstacle->best_angle
                                          : p_obstacle->angle);
     field_write(132u, 3u, state);
-    bool     b_close = b_forward && ((range * 10u) < ROBOT_CLEARANCE_MM);
+    /* The close stop guards driving into things. Turning in place and
+     * standing still to look do not advance, and a look beside the box
+     * naturally puts the nose near it, so only moves and following count. */
+    bool b_advancing =
+        (MOTION_MOVE == motion_mode) || (MOTION_FOLLOW == motion_mode);
+    bool b_close =
+        b_forward && b_advancing && ((range * 10u) < ROBOT_CLEARANCE_MM);
     bool     b_abort = (OBSTACLE_ABORT == state);
     uint16_t faults  = b_close ? DATA_FORMATS_FAULT_ESTOP : 0u;
     faults |= b_abort ? DATA_FORMATS_FAULT_TIMEOUT : 0u;
@@ -1466,7 +1787,7 @@ static bool range_sample(uint16_t * p_range)
     board_io_range_diag_t diagnostic = {0};
     board_io_range_diagnostics(&diagnostic);
 #endif /* OBSTACLE_TEST */
-    bool     b_valid = board_io_range(p_range);
+    bool b_valid = board_io_range(p_range);
 #if OBSTACLE_TEST
     if ((E_OK != result) || (!b_valid) || (*p_range < 2u))
     {
@@ -1477,8 +1798,7 @@ static bool range_sample(uint16_t * p_range)
                   (unsigned)diagnostic.width_us, (unsigned)diagnostic.rises,
                   (unsigned)diagnostic.falls, (unsigned)diagnostic.pins,
                   (unsigned)diagnostic.gpio_control,
-                  (unsigned)diagnostic.gpio_pad,
-                  (unsigned)diagnostic.irq_raw,
+                  (unsigned)diagnostic.gpio_pad, (unsigned)diagnostic.irq_raw,
                   (unsigned)diagnostic.irq_enabled);
     }
 #endif /* OBSTACLE_TEST */

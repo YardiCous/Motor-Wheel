@@ -102,6 +102,10 @@ and the units for biased fields are described below and in the headers.
 | robot_os / buttons_t | `candidate` | 0..7 | 3 | unsigned bit-field |
 | robot_os / buttons_t | `previous` | 0..7 | 3 | unsigned bit-field |
 | robot_os / bench_t | `report_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| robot_os / bench_t | `start_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| robot_os / bench_t | `start_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| robot_os / bench_t | `start_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| robot_os / bench_t | `settle_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | mqtt_utk / mqtt_utk_state_t | `state` | 0..4 | 3 | unsigned bit-field |
 | mqtt_utk / mqtt_utk_state_t | `retry_exponent` | 0..5 | 3 | unsigned bit-field |
 | mqtt_utk / mqtt_utk_state_t | `b_timer_started` | 0..1 | 1 | bool bit-field |
@@ -135,6 +139,17 @@ and the units for biased fields are described below and in the headers.
 | motion / motion_t | `last_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | motion / motion_t | `last_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | physical_test / physical_test_t | `pause_until_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| physical_test / physical_test_t | `start_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| physical_test / physical_test_t | `start_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| physical_test / physical_test_t | `start_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| barcode_test / barcode_test_t | `edge_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| barcode_test / barcode_test_t | `report_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| barcode_test / barcode_test_t | `last_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| barcode_test / barcode_test_t | `last_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| barcode_test / barcode_test_t | `scans` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| barcode_test / barcode_test_t | `moved_edges` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| barcode_test / barcode_test_t | `moving_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| barcode_test / barcode_test_t | `ignored` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | line / line_t | `state` | 0..5 | 3 | unsigned bit-field |
 | line / line_t | `error` | 0..254 | 8 | unsigned bit-field |
 | line / line_t | `barcode` | 0..3 | 2 | unsigned bit-field |
@@ -229,6 +244,7 @@ and the units for biased fields are described below and in the headers.
 | navigation / navigation_t | `width_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `detected_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `b_first_forward` | 0..1 | 1 | bool bit-field |
+| navigation / navigation_t | `b_line_seen` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `b_body_scan` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `body_index` | 0..15 | 4 | unsigned bit-field |
 | navigation / navigation_t | `side_remaining_mm` | 0..4095 | 12 | unsigned bit-field |

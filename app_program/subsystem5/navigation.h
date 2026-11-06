@@ -35,6 +35,7 @@ typedef struct
     uint32_t width_mm : 12;
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
+    bool b_line_seen : 1;
     bool b_body_scan : 1;
     uint32_t body_index : 4;
     uint32_t side_remaining_mm : 12;
@@ -53,6 +54,9 @@ void navigation_barcode(navigation_t * p_navigation, uint8_t barcode);
 /** @brief Accept a bounded width and side clearances for a pending bypass. */
 bool navigation_obstacle_plan(navigation_t * p_navigation, uint16_t width_mm,
                                uint16_t left_cm, uint16_t right_cm);
+/** @brief Accept the servo scan's chosen side and sideways distance. */
+bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm,
+                               uint16_t side_mm, bool b_left);
 /** @brief Request a centred-sensor body sweep for a pending bypass. */
 bool navigation_body_scan(navigation_t * p_navigation);
 /** @brief Run one 10-ms arbitration cycle; output is one packed command. */

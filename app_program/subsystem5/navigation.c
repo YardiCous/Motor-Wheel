@@ -11,21 +11,27 @@
 #include <string.h>
 
 /* Bypass stages. S is the chosen side, F the original heading, and L the
- * direction back toward the line (opposite of S). */
+ * direction back toward the line (opposite of S). The robot stops for
+ * NAVIGATION_SETTLE_MS before every turn, move and look. */
 #define BYPASS_CHOOSE 0u
 #define BYPASS_TURN_OUT 1u    /* F -> S */
-#define BYPASS_SIDE_MOVE 2u   /* step sideways, facing S */
-#define BYPASS_SIDE_FACE 3u   /* S -> F, to look ahead at the obstacle */
+#define BYPASS_SIDE_MOVE 2u   /* edge + half robot + margin, facing S */
+#define BYPASS_SIDE_FACE 3u   /* S -> F */
+#define BYPASS_SIDE_CHECK 4u  /* straight ahead clear? else step out more */
+#define BYPASS_SIDE_AGAIN 5u  /* F -> S for one extra sideways step */
 #define BYPASS_FWD_MOVE 6u    /* step forward, facing F */
 #define BYPASS_FWD_FACE 7u    /* F -> L, to look across at the obstacle */
 #define BYPASS_FWD_LOOK 8u    /* still beside? */
 #define BYPASS_FWD_RETURN 9u  /* L -> F */
-#define BYPASS_BACK_MOVE 10u  /* drive back toward the line, facing L */
-#define BYPASS_BACK_TURN 11u  /* L -> F, then search for the line */
+#define BYPASS_BACK_MOVE 10u  /* toward the line, facing L, until tape */
+#define BYPASS_BACK_ALIGN 11u /* tape seen: bring the axle onto the line */
+#define BYPASS_BACK_TURN 12u  /* L -> F, then follow (or sweep) */
 #define NAVIGATION_SETTLE_MS 400u
 #define NAVIGATION_STEP_MM                                                    \
     ((uint16_t)((ROBOT_TURN_MM_SECOND * ROBOT_BYPASS_STEP_MS) / 1000u))
 #define NAVIGATION_BESIDE_EXTRA_CM 20u
+/* A safe step shorter than this means a wall: stop with a fault. */
+#define NAVIGATION_MIN_STEP_MM 30u
 
 _Static_assert(ROBOT_BYPASS_STEP_MS <= 8000u,
                "a bypass step must finish inside the 10 s manoeuvre limit");
@@ -53,6 +59,12 @@ static void bypass_turn(navigation_t * p_navigation, bool b_out);
 static void bypass_move(navigation_t * p_navigation, uint16_t distance);
 static void bypass_look(navigation_t * p_navigation, bool b_blocked,
                         uint32_t next_clear);
+static void bypass_check(navigation_t * p_navigation, uint16_t seen);
+static void bypass_forward(navigation_t * p_navigation, uint16_t range_cm,
+                           bool b_range_valid);
+static uint16_t safe_step(navigation_t * p_navigation, uint32_t wanted,
+                          uint16_t range_cm, bool b_range_valid, bool b_whole);
+static void     resume_follow(navigation_t * p_navigation);
 static void step_follow(navigation_t * p_navigation, bool b_line_lost,
                         bool b_on_hump, uint16_t range_cm, bool b_range_valid,
                         bool b_barcode_zone);
@@ -209,31 +221,56 @@ static void issue(navigation_t * p_navigation, uint8_t mode, uint16_t distance,
         &p_navigation->command, mode, distance, speed, b_reverse);
 }
 
-/** @brief Save a scan plan only while stopped and choosing a bypass. */
-bool navigation_obstacle_plan (navigation_t * p_navigation, uint16_t width_mm,
-                               uint16_t left_cm, uint16_t right_cm)
+/** @brief Body-sweep plan: readings at +/-90 degrees are sideways room. The
+ * edges were not seen separately, so the box is taken as centred.
+ */
+bool navigation_obstacle_plan(navigation_t * p_navigation, uint16_t width_mm,
+                              uint16_t left_cm, uint16_t right_cm)
 {
-    uint32_t travel = width_mm + ROBOT_BYPASS_SIDE_MARGIN_MM;
-    bool b_valid = (DATA_FORMATS_AVOID == p_navigation->state) &&
-                   (BYPASS_CHOOSE == p_navigation->stage) &&
-                   (0u != width_mm) && (travel <= 4095u) &&
-                   (left_cm <= ROBOT_RANGE_MAX_CM) &&
-                   (right_cm <= ROBOT_RANGE_MAX_CM) &&
-                   (((left_cm * 10u) > travel) ||
-                    ((right_cm * 10u) > travel));
+    uint16_t side       = obstacle_side_mm(width_mm / 2u);
+    bool     b_left_ok  = (left_cm <= ROBOT_RANGE_MAX_CM) &&
+                          (obstacle_room(left_cm * 10u, side));
+    bool     b_right_ok = (right_cm <= ROBOT_RANGE_MAX_CM) &&
+                          (obstacle_room(right_cm * 10u, side));
+    bool     b_valid    = (DATA_FORMATS_AVOID == p_navigation->state) &&
+                          (BYPASS_CHOOSE == p_navigation->stage) &&
+                          (0u != width_mm) && (width_mm <= 4095u) &&
+                          (b_left_ok || b_right_ok);
 
     if (b_valid)
     {
         p_navigation->width_mm = width_mm;
-        p_navigation->left_cm = left_cm;
+        p_navigation->side_mm  = side;
+        p_navigation->left_cm  = left_cm;
         p_navigation->right_cm = right_cm;
+        p_navigation->b_left =
+            b_left_ok && ((!b_right_ok) || (left_cm >= right_cm));
+    }
+
+    return b_valid;
+}
+
+/** @brief Servo-scan plan: the scanner already chose the side and distance.
+ */
+bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm,
+                               uint16_t side_mm, bool b_left)
+{
+    bool b_valid = (DATA_FORMATS_AVOID == p_navigation->state) &&
+                   (BYPASS_CHOOSE == p_navigation->stage) && (0u != side_mm) &&
+                   (side_mm <= 4095u) && (width_mm <= 4095u);
+
+    if (b_valid)
+    {
+        p_navigation->width_mm = width_mm;
+        p_navigation->side_mm  = side_mm;
+        p_navigation->b_left   = b_left;
     }
 
     return b_valid;
 }
 
 /** @brief Preserve the saved detection range while widening the view. */
-bool navigation_body_scan (navigation_t * p_navigation)
+bool navigation_body_scan(navigation_t * p_navigation)
 {
     bool b_valid = (DATA_FORMATS_AVOID == p_navigation->state) &&
                    (BYPASS_CHOOSE == p_navigation->stage) &&
@@ -241,22 +278,25 @@ bool navigation_body_scan (navigation_t * p_navigation)
 
     if (b_valid)
     {
-        p_navigation->b_body_scan = true;
-        p_navigation->look = 0u;
-        p_navigation->body_index = 0u;
-        p_navigation->elapsed_ms = 0u;
+        p_navigation->b_body_scan  = true;
+        p_navigation->look         = 0u;
+        p_navigation->body_index   = 0u;
+        p_navigation->elapsed_ms   = 0u;
         p_navigation->scan_failure = 0u;
     }
 
     return b_valid;
 }
 
-/** @brief Execute measured-width lateral travel, then the detected distance. */
+/** @brief Wait for a plan, then run one stage at a time. On the return leg
+ * the first sight of tape stops the robot at once.
+ */
 static void step_bypass(navigation_t * p_navigation, bool b_done,
                         bool b_line_valid, bool b_scan_ready, bool b_scan_left,
                         uint16_t range_cm, bool b_range_valid)
 {
     bool b_chosen = false;
+    (void)b_scan_left;
 
     if ((BYPASS_CHOOSE == p_navigation->stage) &&
         ((p_navigation->b_body_scan) ||
@@ -267,15 +307,19 @@ static void step_bypass(navigation_t * p_navigation, bool b_done,
     }
     else if ((BYPASS_CHOOSE == p_navigation->stage) && b_scan_ready)
     {
-        if (0u == p_navigation->width_mm)
-        {
-            p_navigation->b_fault = true;
-            return;
-        }
-
-        p_navigation->b_left = b_scan_left;
-        p_navigation->stage  = BYPASS_TURN_OUT;
-        b_chosen             = true;
+        p_navigation->b_fault = (0u == p_navigation->side_mm);
+        p_navigation->stage   = BYPASS_TURN_OUT;
+        b_chosen              = !p_navigation->b_fault;
+    }
+    else if ((BYPASS_BACK_MOVE == p_navigation->stage) &&
+             (p_navigation->b_waiting) && b_line_valid)
+    {
+        p_navigation->b_stop_requested = true;
+        p_navigation->b_command_ready  = false;
+        p_navigation->b_waiting        = false;
+        p_navigation->b_line_seen      = true;
+        p_navigation->elapsed_ms       = 0u;
+        p_navigation->stage            = BYPASS_BACK_ALIGN;
     }
     else if ((p_navigation->b_waiting) && b_done)
     {
@@ -296,14 +340,13 @@ static void step_bypass(navigation_t * p_navigation, bool b_done,
 
     if (b_chosen)
     {
-        p_navigation->b_waiting  = false;
-        p_navigation->elapsed_ms = 0u;
-        p_navigation->side_mm = p_navigation->width_mm +
-                                ROBOT_BYPASS_SIDE_MARGIN_MM;
+        p_navigation->b_waiting         = false;
+        p_navigation->elapsed_ms        = 0u;
         p_navigation->side_remaining_mm = p_navigation->side_mm;
-        p_navigation->b_first_forward = true;
-        p_navigation->steps      = 0u;
-        p_navigation->b_margin   = false;
+        p_navigation->b_first_forward   = true;
+        p_navigation->b_line_seen       = false;
+        p_navigation->steps             = 0u;
+        p_navigation->b_margin          = false;
     }
 
     bool b_running = (DATA_FORMATS_AVOID == p_navigation->state) &&
@@ -320,25 +363,25 @@ static void step_bypass(navigation_t * p_navigation, bool b_done,
  */
 static void bypass_done(navigation_t * p_navigation, bool b_line_valid)
 {
+    uint32_t moved  = (p_navigation->command >> 2u) & 4095u;
+    uint32_t remain = p_navigation->side_remaining_mm;
+    remain          = (moved < remain) ? (remain - moved) : 0u;
+
     switch (p_navigation->stage)
     {
         case BYPASS_TURN_OUT:
+        case BYPASS_SIDE_AGAIN:
             p_navigation->stage = BYPASS_SIDE_MOVE;
             break;
 
         case BYPASS_SIDE_MOVE:
-        {
-            uint32_t moved = (p_navigation->command >> 2u) & 4095u;
-            p_navigation->side_remaining_mm =
-                (moved < p_navigation->side_remaining_mm)
-                    ? (p_navigation->side_remaining_mm - moved) : 0u;
-            p_navigation->stage = (0u == p_navigation->side_remaining_mm)
-                                      ? BYPASS_SIDE_FACE : BYPASS_SIDE_MOVE;
-        }
-        break;
+            p_navigation->side_remaining_mm = remain;
+            p_navigation->stage =
+                (0u == remain) ? BYPASS_SIDE_FACE : BYPASS_SIDE_MOVE;
+            break;
 
         case BYPASS_SIDE_FACE:
-            p_navigation->stage = BYPASS_FWD_MOVE;
+            p_navigation->stage = BYPASS_SIDE_CHECK;
             break;
 
         case BYPASS_FWD_MOVE:
@@ -354,28 +397,46 @@ static void bypass_done(navigation_t * p_navigation, bool b_line_valid)
             break;
 
         case BYPASS_BACK_MOVE:
-            p_navigation->stage = (0u == p_navigation->side_mm)
-                                      ? BYPASS_BACK_TURN
-                                      : BYPASS_BACK_MOVE;
+            p_navigation->side_remaining_mm = remain;
+            p_navigation->stage =
+                (0u == remain) ? BYPASS_BACK_TURN : BYPASS_BACK_MOVE;
+            break;
+
+        case BYPASS_BACK_ALIGN:
+            p_navigation->stage = BYPASS_BACK_TURN;
             break;
 
         default:
-            /* BACK_TURN finished: facing F beside the line, so search. */
-            start_search(p_navigation, b_line_valid);
+            /* BACK_TURN finished: on the line if tape stopped the return
+             * leg, otherwise beside it, so sweep for it. */
+            if ((p_navigation->b_line_seen) || (0u != ROBOT_NO_LINE))
+            {
+                resume_follow(p_navigation);
+            }
+            else
+            {
+                start_search(p_navigation, b_line_valid);
+            }
             break;
     }
 }
 
-/** @brief Issue the current stage's turn or move, or evaluate a look. */
+/** @brief Issue the current stage's turn or move, or evaluate a look. Every
+ * action waits until the robot has been still for NAVIGATION_SETTLE_MS.
+ */
 static void bypass_act(navigation_t * p_navigation, uint16_t range_cm,
                        bool b_range_valid)
 {
-    uint16_t step = NAVIGATION_STEP_MM;
     /* An invalid reading is treated as the obstacle still being there. */
-    uint16_t seen   = b_range_valid ? range_cm : 0u;
-    uint32_t beside = p_navigation->side_mm / 10u;
-    beside += NAVIGATION_BESIDE_EXTRA_CM;
-    bool b_still = (p_navigation->elapsed_ms >= NAVIGATION_SETTLE_MS);
+    uint16_t seen = b_range_valid ? range_cm : 0u;
+    uint32_t beside =
+        (p_navigation->side_mm / 10u) + NAVIGATION_BESIDE_EXTRA_CM;
+    uint16_t step = 0u;
+
+    if (p_navigation->elapsed_ms < NAVIGATION_SETTLE_MS)
+    {
+        return;
+    }
 
     switch (p_navigation->stage)
     {
@@ -385,67 +446,131 @@ static void bypass_act(navigation_t * p_navigation, uint16_t range_cm,
             break;
 
         case BYPASS_SIDE_MOVE:
-            if (b_still)
+        case BYPASS_BACK_MOVE:
+            /* Sideways, a wall closer than the whole move is a fault; the
+             * return leg may be cut short, since it stops on the tape. */
+            step = safe_step(p_navigation, p_navigation->side_remaining_mm,
+                             range_cm, b_range_valid,
+                             BYPASS_SIDE_MOVE == p_navigation->stage);
+            if (0u != step)
             {
-                step = (uint16_t)p_navigation->side_remaining_mm;
-                step = (step > NAVIGATION_MAX_LEG_MM)
-                           ? (uint16_t)NAVIGATION_MAX_LEG_MM : step;
-                if ((!b_range_valid) ||
-                    ((range_cm * 10u) <= (step + ROBOT_CLEARANCE_MM)))
-                {
-                    p_navigation->b_fault = true;
-                    p_navigation->b_stop_requested = true;
-                }
-                else
-                {
-                    bypass_move(p_navigation, step);
-                }
+                bypass_move(p_navigation, step);
             }
+            break;
+
+        case BYPASS_SIDE_CHECK:
+            bypass_check(p_navigation, seen);
             break;
 
         case BYPASS_FWD_MOVE:
-            step = p_navigation->b_margin ? ROBOT_BYPASS_FWD_MARGIN_MM : step;
-            step = p_navigation->b_first_forward
-                       ? (uint16_t)p_navigation->detected_mm : step;
-            if (b_still)
-            {
-                if ((!b_range_valid) ||
-                    ((range_cm * 10u) <= (step + ROBOT_CLEARANCE_MM)))
-                {
-                    p_navigation->b_fault = true;
-                    p_navigation->b_stop_requested = true;
-                }
-                else
-                {
-                    p_navigation->b_first_forward = false;
-                    bypass_move(p_navigation, step);
-                }
-            }
-            break;
-
-        case BYPASS_BACK_MOVE:
-            step                  = (p_navigation->side_mm < step)
-                                        ? (uint16_t)p_navigation->side_mm
-                                        : step;
-            p_navigation->side_mm = p_navigation->side_mm - step;
-            bypass_move(p_navigation, step);
+            bypass_forward(p_navigation, range_cm, b_range_valid);
             break;
 
         case BYPASS_FWD_LOOK:
-            if (b_still)
+            bypass_look(p_navigation, seen < beside, BYPASS_BACK_MOVE);
+            if (BYPASS_BACK_MOVE == p_navigation->stage)
             {
-                bypass_look(p_navigation, seen < beside, BYPASS_BACK_MOVE);
-                p_navigation->stage = (BYPASS_BACK_MOVE == p_navigation->stage)
-                                          ? BYPASS_BACK_MOVE
-                                          : BYPASS_FWD_RETURN;
+                uint32_t back = (uint32_t)p_navigation->side_mm +
+                                ROBOT_BYPASS_BACK_EXTRA_MM;
+                p_navigation->side_remaining_mm =
+                    (back > 4095u) ? 4095u : back;
+            }
+            else
+            {
+                p_navigation->stage = BYPASS_FWD_RETURN;
             }
             break;
 
+        case BYPASS_BACK_ALIGN:
+            bypass_move(p_navigation, ROBOT_SENSOR_AHEAD_MM);
+            break;
+
         default:
-            /* TURN_OUT, FWD_RETURN and BACK_TURN turn toward S. */
+            /* TURN_OUT, SIDE_AGAIN, FWD_RETURN and BACK_TURN turn toward S.
+             */
             bypass_turn(p_navigation, true);
             break;
     }
+}
+
+/** @brief Facing F after the side move: the box must no longer be ahead.
+ * If it is, the edge estimate was short, so step out further.
+ */
+static void bypass_check(navigation_t * p_navigation, uint16_t seen)
+{
+    uint32_t blocked_cm =
+        (p_navigation->detected_mm / 10u) + NAVIGATION_BESIDE_EXTRA_CM;
+
+    if (seen >= blocked_cm)
+    {
+        p_navigation->stage = BYPASS_FWD_MOVE;
+    }
+    else
+    {
+        uint32_t side =
+            (uint32_t)p_navigation->side_mm + ROBOT_BYPASS_SIDE_EXTRA_MM;
+        ++p_navigation->steps;
+        p_navigation->b_fault =
+            (p_navigation->steps > ROBOT_BYPASS_MAX_STEPS) || (side > 4095u);
+        p_navigation->side_mm           = (side > 4095u) ? 4095u : side;
+        p_navigation->side_remaining_mm = ROBOT_BYPASS_SIDE_EXTRA_MM;
+        p_navigation->stage             = BYPASS_SIDE_AGAIN;
+    }
+}
+
+/** @brief The first leg carries the robot from the detection point to
+ * beside the box; later legs are fixed steps, or one margin move.
+ */
+static void bypass_forward(navigation_t * p_navigation, uint16_t range_cm,
+                           bool b_range_valid)
+{
+    uint32_t wanted = NAVIGATION_STEP_MM;
+    wanted = p_navigation->b_margin ? ROBOT_BYPASS_FWD_MARGIN_MM : wanted;
+    wanted = p_navigation->b_first_forward
+                 ? ((uint32_t)p_navigation->detected_mm + ROBOT_LENGTH_MM)
+                 : wanted;
+    uint16_t step =
+        safe_step(p_navigation, wanted, range_cm, b_range_valid, false);
+
+    if (0u != step)
+    {
+        p_navigation->b_first_forward = false;
+        bypass_move(p_navigation, step);
+    }
+}
+
+/** @brief Shorten a move to the free range ahead minus the clearance, and
+ * to one leg the manoeuvre timer allows. Too little room is a fault, and so
+ * is any shortfall when b_whole demands the full distance.
+ */
+static uint16_t safe_step(navigation_t * p_navigation, uint32_t wanted,
+                          uint16_t range_cm, bool b_range_valid, bool b_whole)
+{
+    uint32_t room = b_range_valid ? ((uint32_t)range_cm * 10u) : 0u;
+    room = (room > ROBOT_CLEARANCE_MM) ? (room - ROBOT_CLEARANCE_MM) : 0u;
+    uint32_t step = (wanted < room) ? wanted : room;
+    step = (step > NAVIGATION_MAX_LEG_MM) ? NAVIGATION_MAX_LEG_MM : step;
+
+    bool b_short = b_whole && (room < wanted);
+
+    if ((step < NAVIGATION_MIN_STEP_MM) || b_short)
+    {
+        p_navigation->b_fault          = true;
+        p_navigation->b_stop_requested = true;
+        step                           = 0u;
+    }
+
+    return (uint16_t)step;
+}
+
+/** @brief Hand back to line following at the cautious speed. */
+static void resume_follow(navigation_t * p_navigation)
+{
+    p_navigation->state     = DATA_FORMATS_FOLLOW;
+    p_navigation->stage     = 0u;
+    p_navigation->b_waiting = false;
+    p_navigation->b_slow    = true;
+    issue(p_navigation, MOTION_FOLLOW, 0u, ROBOT_CAUTIOUS_MM_SECOND, false);
 }
 
 /** @brief Quarter turn toward S (out) or away from S (back). A left side
@@ -512,11 +637,12 @@ static void step_follow(navigation_t * p_navigation, bool b_line_lost,
         p_navigation->b_stop_requested = true;
         p_navigation->b_command_ready  = false;
         p_navigation->b_scan_requested = true;
-        p_navigation->detected_mm = range_cm * 10u;
-        p_navigation->width_mm = 0u;
-        p_navigation->b_body_scan = false;
-        p_navigation->body_index = 0u;
-        p_navigation->scan_failure = 0u;
+        p_navigation->detected_mm      = range_cm * 10u;
+        p_navigation->width_mm         = 0u;
+        p_navigation->side_mm          = 0u;
+        p_navigation->b_body_scan      = false;
+        p_navigation->body_index       = 0u;
+        p_navigation->scan_failure     = 0u;
         p_navigation->stage            = 0u;
         p_navigation->elapsed_ms       = 0u;
         p_navigation->b_waiting        = false;
@@ -603,16 +729,15 @@ static void step_search(navigation_t * p_navigation, bool b_done,
 /** @brief Validate the measured body width before selecting the route. */
 static void finish_body_scan(navigation_t * p_navigation)
 {
-    uint16_t width = obstacle_body_width(p_navigation->body_ranges);
-    bool b_plan = navigation_obstacle_plan(
+    uint16_t width  = obstacle_body_width(p_navigation->body_ranges);
+    bool     b_plan = navigation_obstacle_plan(
         p_navigation, width, p_navigation->body_ranges[0],
         p_navigation->body_ranges[OBSTACLE_BODY_POINTS - 1u]);
 
     if (!b_plan)
     {
-        p_navigation->scan_failure = (0u == width)
-                                         ? OBSTACLE_REASON_NO_EDGES
-                                         : OBSTACLE_REASON_BLOCKED;
+        p_navigation->scan_failure =
+            (0u == width) ? OBSTACLE_REASON_NO_EDGES : OBSTACLE_REASON_BLOCKED;
         for (uint8_t index = 0u; index < OBSTACLE_BODY_POINTS; ++index)
         {
             uint16_t range = p_navigation->body_ranges[index];
@@ -622,7 +747,7 @@ static void finish_body_scan(navigation_t * p_navigation)
             }
         }
 
-        if ((p_navigation->body_ranges[6] * 10u) > ROBOT_OBSTACLE_MM)
+        if ((p_navigation->body_ranges[6] * 10u) > OBSTACLE_FRONT_MAX_MM)
         {
             p_navigation->scan_failure = OBSTACLE_REASON_NO_FRONT;
         }
@@ -630,10 +755,8 @@ static void finish_body_scan(navigation_t * p_navigation)
     }
     else
     {
-        p_navigation->b_left =
-            (p_navigation->left_cm >= p_navigation->right_cm);
-        p_navigation->stage = BYPASS_TURN_OUT;
-        p_navigation->b_waiting = false;
+        p_navigation->stage      = BYPASS_TURN_OUT;
+        p_navigation->b_waiting  = false;
         p_navigation->elapsed_ms = 0u;
     }
 }
@@ -652,7 +775,7 @@ static void step_look(navigation_t * p_navigation, bool b_done,
         case 0u:
             issue(p_navigation, MOTION_TURN, NAVIGATION_QUARTER_ARC_MM,
                   ROBOT_TURN_MM_SECOND, true);
-            p_navigation->look = 1u;
+            p_navigation->look       = 1u;
             p_navigation->elapsed_ms = 0u;
             break;
 
@@ -674,11 +797,14 @@ static void step_look(navigation_t * p_navigation, bool b_done,
                 if (p_navigation->body_index < (OBSTACLE_BODY_POINTS - 1u))
                 {
                     uint32_t current = (p_navigation->body_index *
-                                        NAVIGATION_QUARTER_ARC_MM) / 6u;
-                    uint32_t next = ((p_navigation->body_index + 1u) *
-                                     NAVIGATION_QUARTER_ARC_MM) / 6u;
-                    issue(p_navigation, MOTION_TURN, (uint16_t)(next - current),
-                          ROBOT_TURN_MM_SECOND, false);
+                                        NAVIGATION_QUARTER_ARC_MM) /
+                                       6u;
+                    uint32_t next    = ((p_navigation->body_index + 1u) *
+                                        NAVIGATION_QUARTER_ARC_MM) /
+                                       6u;
+                    issue(p_navigation, MOTION_TURN,
+                          (uint16_t)(next - current), ROBOT_TURN_MM_SECOND,
+                          false);
                     p_navigation->look = 3u;
                 }
                 else

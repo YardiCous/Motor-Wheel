@@ -117,14 +117,32 @@ endif
 ifeq ($(BODY_SCAN),1)
 BODY_SCAN_SUFFIX := _bodyscan
 endif
-# OBSTACLE_TEST=1 follows the real line sensors and runs scan/bypass.
+# OBSTACLE_TEST=1 ignores the line sensors: it drives straight, bypasses
+# the obstacle, comes back to its original path and drives straight on.
 # Only the IMU is stubbed; motors, encoders and ranging remain active.
 OBSTACLE_TEST ?= 0
 ifneq ($(filter $(OBSTACLE_TEST),0 1),$(OBSTACLE_TEST))
 $(error Unknown OBSTACLE_TEST '$(OBSTACLE_TEST)'; use 0 or 1)
 endif
 ifeq ($(OBSTACLE_TEST),1)
-OBSTACLE_TEST_SUFFIX := _obstacletest
+OBSTACLE_TEST_SUFFIX := _obstacle_nolinetest
+endif
+# BARCODE_TEST=1 prints the raw GP28 barcode sensor data with the motors off;
+# BARCODE_TEST=2 prints the same and decodes it as a Code 39 capital letter.
+BARCODE_TEST ?= 0
+ifneq ($(filter $(BARCODE_TEST),0 1 2),$(BARCODE_TEST))
+$(error Unknown BARCODE_TEST '$(BARCODE_TEST)'; use 0, 1 or 2)
+endif
+ifeq ($(BARCODE_TEST),1)
+BARCODE_TEST_SUFFIX := _barcoderaw
+endif
+ifeq ($(BARCODE_TEST),2)
+BARCODE_TEST_SUFFIX := _barcodedecode
+endif
+ifneq ($(BARCODE_TEST),0)
+ifneq ($(MOTOR_TEST)$(ENCODER_TEST)$(OBSTACLE_TEST)$(LINE_TEST),0000)
+$(error BARCODE_TEST cannot be combined with another bench test)
+endif
 endif
 ifneq ($(MOTOR_TEST)$(ENCODER_TEST)$(OBSTACLE_TEST)$(LINE_TEST),0001)
 ifneq ($(MOTOR_TEST)$(ENCODER_TEST)$(OBSTACLE_TEST)$(LINE_TEST),0000)
@@ -172,7 +190,7 @@ endif
 # a live hazard: an SMP=1 build was once flashed in place of an SMP=0 one and
 # only the banner in the log revealed it.
 #
-EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)$(MOTOR_TEST_SUFFIX)$(ENCODER_TEST_SUFFIX)$(OBSTACLE_TEST_SUFFIX)$(LINE_TEST_SUFFIX)$(BODY_SCAN_SUFFIX)
+EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)$(MOTOR_TEST_SUFFIX)$(ENCODER_TEST_SUFFIX)$(OBSTACLE_TEST_SUFFIX)$(LINE_TEST_SUFFIX)$(BARCODE_TEST_SUFFIX)$(BODY_SCAN_SUFFIX)
 
 GCC := arm-none-eabi-gcc
 AS := arm-none-eabi-gcc
@@ -232,7 +250,7 @@ ifeq ($(SMP),1)
 CFLAGS  += -DCNF_SMP=1
 ASFLAGS += -DCNF_SMP=1
 endif
-CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST) -DOBSTACLE_TEST=$(OBSTACLE_TEST) -DLINE_TEST=$(LINE_TEST) -DROBOT_BODY_SCAN=$(BODY_SCAN)u
+CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST) -DOBSTACLE_TEST=$(OBSTACLE_TEST) -DLINE_TEST=$(LINE_TEST) -DBARCODE_TEST=$(BARCODE_TEST) -DOBSTACLE_NO_LINE=$(OBSTACLE_TEST) -DROBOT_BODY_SCAN=$(BODY_SCAN)u
 CFLAGS  += -DTM_CONSOLE_UART=$(CRASH_REPORT)
 ifeq ($(CRASH_REPORT),0)
 CFLAGS  += -DBOARD_UART0_FREE=1
@@ -265,7 +283,7 @@ endif
 # before any recipe executes.
 ################################################################################
 
-PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)-motor$(MOTOR_TEST)-enc$(ENCODER_TEST)-obst$(OBSTACLE_TEST)-line$(LINE_TEST)-body$(BODY_SCAN)
+PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)-motor$(MOTOR_TEST)-enc$(ENCODER_TEST)-obst$(OBSTACLE_TEST)-line$(LINE_TEST)-bar$(BARCODE_TEST)-body$(BODY_SCAN)
 PROFILE_FILE := .build_profile
 
 ifneq ($(strip $(shell cat $(PROFILE_FILE) 2>/dev/null)),$(PROFILE_ID))
@@ -526,4 +544,3 @@ include mtkernel_3/lib/libbsp/sysdepend/cpu/rp2040/subdir.mk
 include mtkernel_3/kernel/sysdepend/pico_rp2040/subdir.mk
 include mtkernel_3/kernel/sysdepend/cpu/rp2040/subdir.mk
 include mtkernel_3/kernel/sysdepend/cpu/core/armv6m/subdir.mk
-

@@ -17,6 +17,8 @@ Echo capture and GPIO evidence for the most recent ping. */
 typedef struct
 {
     uint32_t width_us;
+    uint32_t rise_after_us; /* Software trigger to rising-edge ISR. */
+    uint32_t tick_config;   /* Watchdog tick enable and divider bits. */
     uint32_t rises;
     uint32_t falls;
     uint32_t gpio_control;

@@ -127,6 +127,14 @@ Keep the ultrasonic head aligned forward for body scanning.
 RESET reinitialises the ranging pins and echo capture. The trigger pulse is
 timed directly for 12 microseconds, so it does not depend on a timer ISR.
 
+The startup clock code explicitly configures the watchdog tick divider for
+a 1-MHz timer reference on every boot. USB BOOTSEL sets that divider while
+flashing, but normal flash boot does not. Inheriting its reset value made
+timer-based trigger pulses, echo widths and network delays depend on how the
+firmware was started. The firmware now owns that setup after selecting the
+12-MHz crystal reference. This starts the tick generator, not a watchdog reset
+countdown. `ECHO` diagnostics report `tick=0x20c` for the expected setup.
+
 ## Wiring and operating assumptions
 
 See [TEAM.md](TEAM.md) for every pin and peripheral owner. The implementation

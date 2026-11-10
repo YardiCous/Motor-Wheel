@@ -49,6 +49,7 @@ typedef struct
     uint32_t left;
     uint32_t right;
     uint32_t rise_us;
+    uint32_t trigger_us;
     uint32_t echo_rises;
     uint32_t echo_falls;
     uint32_t echo_width : 15;
@@ -313,6 +314,7 @@ void board_io_range_reset(void)
     g_capture.echo_state = 0u;
     g_capture.echo_width = 0u;
     g_capture.rise_us    = 0u;
+    g_capture.trigger_us = 0u;
     write_reg(BOARD_IO + 0xf0u, 0xc0u);
     write_reg(BOARD_IO + 0x2100u, 0xc0u);
     board_io_unlock(mask);
@@ -343,10 +345,12 @@ void board_io_ping(void)
     uint32_t mask        = board_io_lock();
     g_capture.echo_state = 0u;
     g_capture.echo_width = 0u;
+    g_capture.rise_us    = 0u;
     write_reg(BOARD_SIO + 0x18u, 1u);
     trigger_delay(BOARD_TRIGGER_LOW_US);
     write_reg(BOARD_IO + 0xf0u, 0xc0u);
     g_capture.echo_state = 1u;
+    g_capture.trigger_us = board_io_time_us();
     write_reg(BOARD_SIO + 0x14u, 1u);
     trigger_delay(BOARD_TRIGGER_HIGH_US);
     write_reg(BOARD_SIO + 0x18u, 1u);
@@ -386,6 +390,10 @@ void board_io_range_diagnostics(board_io_range_diag_t * p_diag)
     uint32_t mask        = board_io_lock();
     p_diag->state        = (uint8_t)g_capture.echo_state;
     p_diag->width_us     = g_capture.echo_width;
+    p_diag->rise_after_us = (g_capture.echo_state >= 2u)
+                               ? (g_capture.rise_us - g_capture.trigger_us)
+                               : 0u;
+    p_diag->tick_config = read_reg(BOARD_WATCHDOG + 0x2cu) & 0x3ffu;
     p_diag->rises        = g_capture.echo_rises;
     p_diag->falls        = g_capture.echo_falls;
     p_diag->pins         = (uint8_t)(read_reg(BOARD_SIO + 4u) & 3u);

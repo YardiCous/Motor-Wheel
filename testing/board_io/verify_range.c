@@ -42,6 +42,7 @@ uint32_t board_io_mock_read(uint32_t address)
     if (address == IO + 0x100u) return enabled_edges;
     if (address == IO + 0xf0u) return pending_edges;
     if (address == 0x4000c008u) return 0x4011u;
+    if (address == 0x4005802cu) return 0x1fe60cu;
     return 0u;
 }
 
@@ -116,8 +117,10 @@ static void measure(uint32_t width_us, uint16_t expected_cm)
     board_io_range_diagnostics(&diagnostic);
     assert(diagnostic.state == 3u);
     assert(diagnostic.width_us == width_us);
+    assert(diagnostic.rise_after_us == trigger_width + 101u);
     assert(diagnostic.rises > 0u && diagnostic.falls > 0u);
     assert(diagnostic.irq_enabled == 0xc0u);
+    assert(diagnostic.tick_config == 0x20cu);
     assert(board_io_range(&cm));
     assert(cm == expected_cm);
     assert(!board_io_range(&cm)); /* Completed pulses are consumed once. */
@@ -140,6 +143,7 @@ int main(void)
     board_io_range_diagnostics(&diagnostic);
     assert(diagnostic.state == 1u);
     assert(diagnostic.width_us == 0u);
+    assert(diagnostic.rise_after_us == 0u);
     assert(!board_io_range(&cm));
     assert(cm == 0u);
     /* Reset during an incomplete echo must allow the next ping to work. */
@@ -151,6 +155,8 @@ int main(void)
     pending_edges = 0xc0u;
     board_io_range_reset();
     assert(pending_edges == 0u);
+    board_io_range_diagnostics(&diagnostic);
+    assert(diagnostic.rise_after_us == 0u);
     assert(!board_io_range(&cm));
     measure(1450u, 25u);
     /* Reset must not remove encoder interrupts or change encoder counts. */

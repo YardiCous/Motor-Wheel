@@ -44,6 +44,18 @@ def build_board_io(root, executable):
     subprocess.run(command, check=True)
 
 
+def build_clock(root, executable):
+    command = [os.environ.get("CC", "gcc"), "-std=c99", "-g", "-O1",
+               "-Wall", "-Wextra", "-Werror", "-D_PICO_RP2040_",
+               "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+               "-I" + str(root / "testing/clock"),
+               "-I" + str(root / "include"), "-I" + str(root / "config"),
+               str(root / "testing/clock/verify_clock.c"),
+               str(root / "kernel/sysdepend/pico_rp2040/cpu_clock.c"),
+               "-o", str(executable)]
+    subprocess.run(command, check=True)
+
+
 def run(executable):
     environment = dict(os.environ)
     # These tests allocate no heap memory. The managed runner uses ptrace,
@@ -65,6 +77,9 @@ def main():
         board_executable = Path(temporary) / "verify_board_io"
         build_board_io(ROOT, board_executable)
         output += run(board_executable)
+        clock_executable = Path(temporary) / "verify_clock"
+        build_clock(ROOT, clock_executable)
+        output += run(clock_executable)
         bench_executable = Path(temporary) / "verify_bench"
         build(ROOT, bench_executable, bench=True)
         output += run(bench_executable)

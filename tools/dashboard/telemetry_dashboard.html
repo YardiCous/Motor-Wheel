@@ -52,7 +52,7 @@
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-const names = {vehicle:['Boot','Idle','Following line','Reading barcode','Crossing hump','Avoiding obstacle','Searching','Fault latched'],motion_mode:['Idle','Line following','Moving','Turning','Stalled','Emergency stop','Initializing'],terrain:['Calibrating','Level','Climbing','Cresting','Descending','Impact','Sensor fault'],line_state:['Calibrating','Tracking','Searching','Junction','Scanning','Decoding'],obstacle_state:['Idle','Coarse scan','Fine scan','Planning','Bypassing','Recovering','Aborted'],barcode_command:['Left','Right','Straight','U-turn']};
+const names = {vehicle:['Boot','Idle','Following line','Reading barcode','Crossing hump','Avoiding obstacle','Searching','Fault latched'],motion_mode:['Idle','Line following','Moving','Turning','Stalled','Emergency stop','Initializing'],terrain:['Calibrating','Level','Climbing','Cresting','Descending','Impact','Sensor fault'],line_state:['Calibrating','Tracking','Searching','Junction','Scanning','Decoding'],obstacle_state:['Idle','Coarse scan','Fine scan','Planning','Bypassing','Recovering','Aborted','Body scan'],barcode_command:['Left','Right','Straight','U-turn']};
 const faultNames=['STALL','ENCODER','IMU','NO ECHO','WIFI','IMPACT','E-STOP','WATCHDOG','RANGE','TIMEOUT','QUEUE','MQTT'];
 let state=null, samples=[], paused=false, windowSeconds=30, selected='__motion', fieldSignature='', displayed=null, offset=0, timer=null;
 const fmt = value => value === undefined || value === null ? '—' : typeof value === 'number' ? value.toLocaleString(undefined,{maximumFractionDigits:2}) : String(value);
@@ -81,7 +81,7 @@ function render(s){
     $('explorer').open=true;
   }else{
     put('speed',number(v.speed_mm_second)?v.speed_mm_second*(v.reverse?-1:1):undefined);put('direction',s.latest?(v.reverse?'Reverse travel':'Forward travel'):'Waiting for readings');
-    put('distance',v.distance_mm);put('range',v.range_cm===0?undefined:v.range_cm);put('range-note',v.range_cm===0?'No valid echo':'Ultrasonic range');
+    put('distance',v.distance_mm);put('range',v.range_cm===0?undefined:v.range_cm===1?'<2':v.range_cm);put('range-note',v.range_cm===0?'No valid echo':v.range_cm===1?'Below measuring range':'Ultrasonic range');
     put('vehicle',label('vehicle',v.vehicle));put('motion-mode',label('motion_mode',v.motion_mode));put('protocol',v.version?`V${v.version} PROTOCOL`:'V1 PROTOCOL');
     put('obstacle',label('obstacle_state',v.obstacle_state));put('encoder-left',v.encoder_left);put('encoder-right',v.encoder_right);put('servo',v.servo_deg===undefined?undefined:`${v.servo_deg}°`);
     put('barcode',v.barcode_valid?label('barcode_command',v.barcode_command):'No valid code');

@@ -27,6 +27,11 @@ missing echoes, reset during an incomplete echo, preserved encoder state,
 and microsecond timer wraparound. These checks do not replace a physical
 sensor test.
 
+The real `startup_clock()` is also compiled against mocked clock registers.
+It must set the 1-us watchdog/timer tick after choosing the 12-MHz reference
+for cold-reset, USB-boot, disabled-tick and incorrect-divider initial states,
+without enabling the watchdog reset countdown.
+
 For a direct bench check of the real motors, build and flash the opt-in
 sequence with `MOTOR_TEST=1`:
 

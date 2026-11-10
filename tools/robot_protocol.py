@@ -38,11 +38,12 @@ def decode(payload: bytes) -> dict[str, int | float | bool]:
     for name, maximum in [("vehicle", 7), ("speed_mm_second", 511),
                           ("motion_mode", 6), ("terrain", 6),
                           ("range_cm", 400), ("servo_3deg", 60),
-                          ("line_state", 5), ("obstacle_state", 6)]:
+                          ("line_state", 5), ("obstacle_state", 7)]:
         if result[name] > maximum:
             raise ValueError(f"{name} exceeds its valid range")
-    if result["range_cm"] == 1 or result["line_error_offset"] == 255:
-        raise ValueError("reserved sensor value")
+    # Firmware uses 1 cm as a below-2-cm indication, including short echoes.
+    if result["line_error_offset"] == 255:
+        raise ValueError("line_error_offset is reserved (255)")
     result["pitch_deg"] = (result.pop("pitch_offset") - 64) / 2
     result["line_error"] = result.pop("line_error_offset") - 127
     result["wheel_left_mm_second"] = result.pop("wheel_left_offset") - 512

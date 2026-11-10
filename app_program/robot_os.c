@@ -703,6 +703,10 @@ static void obstacle_task(INT start, void * p_argument)
     /* The ultrasonic can start up stuck hearing its own transmit ringing
      * (a 50-60 us echo, read as 1 cm) until its next power cycle. Give it a
      * quiet start: no pings and no servo surge until it has settled. */
+#if (OBSTACLE_TEST || TM_MQTT)
+    uint32_t clock_start_ms = board_io_time_ms();
+    uint32_t clock_start_us = board_io_time_us();
+#endif /* OBSTACLE_TEST || TM_MQTT */
     for (uint32_t waited = 0u; waited < ROBOT_RANGE_POWER_UP_MS;
          waited += ROBOT_RANGE_PERIOD_MS)
     {
@@ -710,6 +714,16 @@ static void obstacle_task(INT start, void * p_argument)
         heartbeat(4u);
         (void)tk_dly_tsk(ROBOT_RANGE_PERIOD_MS);
     }
+
+#if (OBSTACLE_TEST || TM_MQTT)
+    board_io_range_diag_t clock_diag = {0};
+    board_io_range_diagnostics(&clock_diag);
+    tm_printf((UB *)"TIMEBASE: %u timer ticks in %u ms tick=0x%x "
+                    "(expected 1000 ticks/ms)\n",
+              (unsigned)(board_io_time_us() - clock_start_us),
+              (unsigned)(board_io_time_ms() - clock_start_ms),
+              (unsigned)clock_diag.tick_config);
+#endif /* OBSTACLE_TEST || TM_MQTT */
 
     /* Board start-up leaves the servo unpowered; centre it now, still
      * reporting in so the safety watchdog sees this task is alive. */
@@ -1775,11 +1789,11 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     bool     b_forward      = (30u == measured_angle);
     uint32_t previous_state = p_obstacle->state;
     obstacle_sample(p_obstacle, range, true);
-#if OBSTACLE_TEST
+#if (OBSTACLE_TEST || TM_MQTT)
     tm_printf((UB *)"RANGE: %u cm echoes=%u angle=%u raw=%u,%u,%u\n",
               (unsigned)range, (unsigned)echoes, (unsigned)measured_angle,
               (unsigned)ranges[0], (unsigned)ranges[1], (unsigned)ranges[2]);
-#endif /* OBSTACLE_TEST */
+#endif /* OBSTACLE_TEST || TM_MQTT */
     /* One scan cycle is bounded below 500 ms and fits uint16_t. */
     obstacle_tick(p_obstacle, (uint16_t)(board_io_time_ms() - start + 100u));
     if ((OBSTACLE_COARSE == previous_state) &&
@@ -1835,25 +1849,29 @@ static bool range_sample(uint16_t * p_range)
     UINT pattern = 0u;
     ER   result =
         tk_wai_flg(gh_echo_flag, 1u, TWF_ORW | TWF_BITCLR, &pattern, 25);
-#if OBSTACLE_TEST
+#if (OBSTACLE_TEST || TM_MQTT)
     board_io_range_diag_t diagnostic = {0};
     board_io_range_diagnostics(&diagnostic);
-#endif /* OBSTACLE_TEST */
+#endif /* OBSTACLE_TEST || TM_MQTT */
     bool b_valid = board_io_range(p_range);
-#if OBSTACLE_TEST
+#if (OBSTACLE_TEST || TM_MQTT)
     if ((E_OK != result) || (!b_valid) || (*p_range < 2u))
     {
-        tm_printf((UB *)"ECHO: wait=%d state=%u width=%u us rises=%u "
+        tm_printf((UB *)"ECHO: wait=%d state=%u width=%u us "
+                        "rise_after=%u us rises=%u "
                         "falls=%u pins=%u ctrl=0x%x pad=0x%x "
-                        "irq_raw=0x%x irq_en=0x%x\n",
+                        "irq_raw=0x%x irq_en=0x%x tick=0x%x\n",
                   (int)result, (unsigned)diagnostic.state,
-                  (unsigned)diagnostic.width_us, (unsigned)diagnostic.rises,
+                  (unsigned)diagnostic.width_us,
+                  (unsigned)diagnostic.rise_after_us,
+                  (unsigned)diagnostic.rises,
                   (unsigned)diagnostic.falls, (unsigned)diagnostic.pins,
                   (unsigned)diagnostic.gpio_control,
                   (unsigned)diagnostic.gpio_pad, (unsigned)diagnostic.irq_raw,
-                  (unsigned)diagnostic.irq_enabled);
+                  (unsigned)diagnostic.irq_enabled,
+                  (unsigned)diagnostic.tick_config);
     }
-#endif /* OBSTACLE_TEST */
+#endif /* OBSTACLE_TEST || TM_MQTT */
     uint32_t elapsed = board_io_time_ms() - ping_at;
 
     if (elapsed < ROBOT_RANGE_PERIOD_MS)

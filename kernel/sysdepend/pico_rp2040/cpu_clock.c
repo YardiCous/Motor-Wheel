@@ -104,6 +104,12 @@ EXPORT void startup_clock(ATR clkatr)
 
 	out_w(CLK_REF+CLK_x_DIV, div);
 
+	/* TIMER counts watchdog ticks, not CPU cycles. USB BOOTSEL configures
+	 * this divider, but a normal flash boot does not. Own it on every boot:
+	 * 12 MHz clk_ref / 12 = 1 MHz. This starts only the tick generator;
+	 * it does not enable the watchdog reset countdown. */
+	out_w(WATCHDOG_TICK, WATCHDOG_TICK_ENABLE | XOSC_MHz);
+
 	/* CLK SYS settings */
 	div = (TMCLK_MHz << 8) / TMCLK_MHz;
 	if (div > in_w(CLK_SYS+CLK_x_DIV)) out_w(CLK_SYS+CLK_x_DIV, div);

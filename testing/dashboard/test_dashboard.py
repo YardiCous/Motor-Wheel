@@ -22,6 +22,33 @@ VECTOR = bytes.fromhex('e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e
 TOPICS = {'telemetry': 'robot/telemetry', 'status': 'robot/status', 'ack': 'robot/ack'}
 
 
+def with_field(packet, offset, width, value):
+    word = int.from_bytes(packet, 'little')
+    mask = ((1 << width) - 1) << offset
+    return ((word & ~mask) | (value << offset)).to_bytes(28, 'little')
+
+
+class ProtocolTests(unittest.TestCase):
+    def test_firmware_sensor_values_in_both_decoders(self):
+        for relative in ['tools/robot_protocol.py', 'tools/dashboard/robot_protocol.py']:
+            spec = importlib.util.spec_from_file_location('protocol_under_test', ROOT / relative)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            for distance in [0, 1, 2, 400]:
+                for obstacle in range(8):
+                    with self.subTest(decoder=relative, range_cm=distance, obstacle=obstacle):
+                        packet = with_field(VECTOR, 103, 9, distance)
+                        packet = with_field(packet, 132, 3, obstacle)
+                        values = module.decode(packet)
+                        self.assertEqual(values['range_cm'], distance)
+                        self.assertEqual(values['obstacle_state'], obstacle)
+                        self.assertEqual(values['pitch_deg'], -5.0)
+            for offset, width, value in [(103, 9, 401), (121, 8, 255)]:
+                with self.subTest(decoder=relative, invalid=value):
+                    with self.assertRaises(ValueError):
+                        module.decode(with_field(VECTOR, offset, width, value))
+
+
 def until(predicate, timeout=8):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -60,6 +87,21 @@ class StateTests(unittest.TestCase):
         self.assertEqual(self.state.snapshot(since=1)['samples'], [])
         self.state.ingest(TOPICS['telemetry'], VECTOR)
         self.assertEqual([s['id'] for s in self.state.snapshot(since=1)['samples']], [2])
+
+    def test_near_echo_and_body_scan_keep_dashboard_live(self):
+        near = with_field(VECTOR, 103, 9, 1)
+        body = with_field(near, 132, 3, 7)
+        for packet in [VECTOR, near, body]:
+            self.state.ingest(TOPICS['telemetry'], packet)
+        snapshot = self.state.snapshot()
+        self.assertEqual(snapshot['received'], 3)
+        self.assertEqual(snapshot['rejected'], 0)
+        self.assertFalse(snapshot['stale'])
+        self.assertEqual(snapshot['latest']['values']['range_cm'], 1)
+        self.assertEqual(snapshot['latest']['values']['obstacle_state'], 7)
+        self.state.ingest(TOPICS['telemetry'], VECTOR)
+        self.assertEqual(self.state.snapshot()['received'], 4)
+        self.assertEqual(self.state.snapshot()['latest']['values']['range_cm'], 400)
 
     def test_invalid_and_retained_packets_do_not_refresh_readings(self):
         self.state.ingest(TOPICS['telemetry'], VECTOR)

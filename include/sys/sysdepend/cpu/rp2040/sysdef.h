@@ -259,7 +259,7 @@
 #define	PLL_FBDIV_INT           (0x08)
 #define	PLL_PRIM                (0x0C)
 
-#define	PLL_CS_LOCK             (1<<31)
+#define	PLL_CS_LOCK             (0x80000000)
 #define	PLL_PWR_PD              (1<<0)
 #define	PLL_PWR_VCOPD           (1<<5)
 #define	PLL_PWR_POSTDIVPD       (1<<3)
@@ -280,6 +280,11 @@
 #define GPIO_OE_SET		(SIO_BASE+0x024)
 #define GPIO_OE_CLR		(SIO_BASE+0x028)
 #define GPIO_OE_XOR		(SIO_BASE+0x02C)
+
+/* Watchdog tick also supplies the system timer's microsecond reference. */
+#define WATCHDOG_BASE            0x40058000
+#define WATCHDOG_TICK            (WATCHDOG_BASE+0x2C)
+#define WATCHDOG_TICK_ENABLE     0x00000200
 
 /* Timer */
 #define TIMER_BASE		0x40054000

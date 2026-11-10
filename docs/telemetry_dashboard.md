@@ -30,6 +30,27 @@ come from `app_program/subsystem1/telemetry.h`. This reads configuration without
 compiling or running C, and never exposes WiFi passwords to the browser.
 Restart the launcher after changing configuration or decoder code.
 
+If stream activity reports `ValueError: reserved sensor value`, update both
+`robot_protocol.py` copies and restart the Python launcher. Firmware reports
+`range_cm=1` for a below-2-cm echo; the dashboard displays this as `<2 cm`.
+Obstacle state `7` means body scan. These values must remain visible rather
+than causing the whole telemetry packet to be rejected. Updating this decoder
+does not require reflashing the robot or correct a false physical echo.
+
+For readings stuck at `<2 cm`, current MQTT firmware also prints USB `RANGE:`
+summaries and `ECHO:` diagnostics for failed or below-range pings. Capture a
+few lines with a stationary target at a known distance. `width` is the
+captured pulse duration; `rise_after` is the time from the software trigger
+timestamp to the rising-edge ISR, so it includes interrupt latency. These
+diagnostics preserve the existing close-stop behaviour.
+
+USB disconnecting and reconnecting, Wi-Fi joining again, and echo counters
+returning to 1 indicate a full chip restart. The GP22 software-reset message
+does not apply to that path. Firmware startup now explicitly initializes the
+microsecond timer's reference; `ECHO` diagnostics show `tick=0x20c` when its
+enable bit and 12-cycle divider are correct. This removes reliance on timer
+setup inherited from USB BOOTSEL flashing.
+
 The robot must be built with `NET=lwip MQTT=1`, and its configured broker must
 be reachable from the computer running Python. The dashboard connects to an
 existing MQTT broker; it does not start one or flash the robot.

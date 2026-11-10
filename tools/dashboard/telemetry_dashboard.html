@@ -12,6 +12,7 @@
 @media(max-width:1000px){.workspace{grid-template-columns:1.5fr 1fr}.two-up{grid-template-columns:1fr}.fields{grid-template-columns:repeat(3,1fr)}.stat{padding:17px}.stat .metric{font-size:30px}.stat-icon{display:none}.header-right .mono{display:none}.legend{gap:9px}.chart-settings{align-items:flex-start;flex-direction:column}}
 @media(max-width:700px){header{height:67px}.brand small{display:none}.header-right{gap:8px}main{padding:25px 4%}.intro{align-items:start;flex-direction:column}.actions{width:100%}.actions button{flex:1}.stats{grid-template-columns:1fr 1fr;gap:10px}.stat{min-height:125px}.workspace{grid-template-columns:1fr}.two-up{grid-template-columns:1fr 1fr}.fields{grid-template-columns:1fr 1fr}.chart-wrap{height:230px}.footer{flex-direction:column}.footer span:last-child{text-align:left}.status-grid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:430px){.two-up{grid-template-columns:1fr}.header-right #clock{display:none}.status-grid{grid-template-columns:1fr 1fr}.chart-head{align-items:flex-start}.legend{font-size:10px}}
+.robot-controls{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px;margin-bottom:18px}.robot-controls .actions{flex-shrink:0}.robot-controls p{font-size:12px;color:var(--muted);margin-top:4px}.robot-controls button{min-width:100px;font-weight:600}.robot-controls .start{background:var(--green);border-color:var(--green);color:#182313}.robot-controls .stop{background:#3c2420;border-color:var(--red);color:var(--red)}.robot-controls .stop:hover{background:#50302a}.custom-mode .robot-controls{display:none}@media(max-width:700px){.robot-controls{align-items:stretch;flex-direction:column}.robot-controls .actions{width:100%}}
 </style>
 </head>
 <body>
@@ -22,6 +23,10 @@
 <main>
   <div class="intro"><div><div class="eyebrow">Mission control <span class="muted">/</span> Live overview</div><h1>Every movement. In view.</h1><p class="muted" id="subtitle">Your robot’s live readings, decoded automatically.</p></div><div class="actions"><button id="pause" aria-pressed="false">Ⅱ &nbsp; Pause view</button><button id="export" disabled>↓ &nbsp; Export CSV</button></div></div>
   <div id="banner" class="connection-banner" role="status">Waiting for the dashboard service…</div>
+  <section class="card robot-controls" aria-label="Robot controls">
+    <div><strong>Robot controls</strong><p id="control-detail">Connect to MQTT to control the robot.</p><p id="command-status" role="status" aria-live="polite"></p></div>
+    <div class="actions"><button class="start" id="start" type="button" disabled>▶ &nbsp; Start</button><button class="stop" id="stop" type="button" disabled>■ &nbsp; Stop</button></div>
+  </section>
   <section class="stats" aria-label="Key readings">
     <article class="card stat"><div class="eyebrow" id="metric-label-0">Ground speed</div><span class="stat-icon" aria-hidden="true">↗</span><div class="metric mono"><span id="speed">—</span><span class="unit" id="metric-unit-0">mm/s</span></div><small id="direction">Waiting for readings</small></article>
     <article class="card stat"><div class="eyebrow" id="metric-label-1">Distance</div><span class="stat-icon" aria-hidden="true">↔</span><div class="metric mono"><span id="distance">—</span><span class="unit" id="metric-unit-1">mm</span></div><small id="distance-note">Modulo 4,096 mm</small></article>
@@ -47,20 +52,44 @@
     </div>
   </div>
   <details class="card explorer" id="explorer"><summary>Decoded field explorer <span id="field-count">All readings · raw packet</span></summary><div class="explorer-inner"><label class="sr-only" for="field-search">Filter decoded fields</label><input class="search" id="field-search" placeholder="Find a field…" type="search"><div class="fields" id="fields"></div><p class="wire mono" id="wire">No packet received yet.</p></div></details>
-  <footer class="footer"><span><span class="good">●</span> MOTOR-WHEEL <span class="muted">/</span> <span id="source">Connecting to local service</span></span><span id="footer-detail">Receive-only dashboard · 28-byte binary telemetry</span></footer>
+  <footer class="footer"><span><span class="good">●</span> MOTOR-WHEEL <span class="muted">/</span> <span id="source">Connecting to local service</span></span><span id="footer-detail">MQTT dashboard · 28-byte binary telemetry</span></footer>
 </main>
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
 const names = {vehicle:['Boot','Idle','Following line','Reading barcode','Crossing hump','Avoiding obstacle','Searching','Fault latched'],motion_mode:['Idle','Line following','Moving','Turning','Stalled','Emergency stop','Initializing'],terrain:['Calibrating','Level','Climbing','Cresting','Descending','Impact','Sensor fault'],line_state:['Calibrating','Tracking','Searching','Junction','Scanning','Decoding'],obstacle_state:['Idle','Coarse scan','Fine scan','Planning','Bypassing','Recovering','Aborted','Body scan'],barcode_command:['Left','Right','Straight','U-turn']};
 const faultNames=['STALL','ENCODER','IMU','NO ECHO','WIFI','IMPACT','E-STOP','WATCHDOG','RANGE','TIMEOUT','QUEUE','MQTT'];
-let state=null, samples=[], paused=false, windowSeconds=30, selected='__motion', fieldSignature='', displayed=null, offset=0, timer=null;
+let state=null, samples=[], paused=false, windowSeconds=30, selected='__motion', fieldSignature='', displayed=null, offset=0, timer=null, sendingStart=false, sendingStop=false, commandError='';
 const fmt = value => value === undefined || value === null ? '—' : typeof value === 'number' ? value.toLocaleString(undefined,{maximumFractionDigits:2}) : String(value);
 const put = (id,value) => {$(id).textContent=fmt(value)};
 const label = (field,value) => names[field]?.[value] ?? fmt(value);
 const human = key => key.replaceAll('_',' ');
 const number = value => typeof value === 'number' && Number.isFinite(value);
 faultNames.forEach((name,i)=>{const span=document.createElement('span');span.className='fault-tag';span.textContent=name;span.id=`fault-${i}`;$('fault-tags').append(span)});
+function renderControls(s){
+  const controls=s?.controls;
+  document.body.classList.toggle('custom-mode',Boolean(s?.custom));
+  $('start').disabled=sendingStart||sendingStop||!controls?.can_start;
+  $('stop').disabled=sendingStop||!controls?.can_stop;
+  $('control-detail').textContent=controls?.detail??'Dashboard service unavailable. Robot controls are disabled.';
+  $('command-status').textContent=commandError||controls?.command?.message||'';
+  $('command-status').style.color=commandError||['rejected','unconfirmed'].includes(controls?.command?.status)?'var(--amber)':'var(--muted)';
+}
+async function sendCommand(command){
+  if(command==='start')sendingStart=true;else sendingStop=true;
+  commandError='';renderControls(state);
+  try{
+    const response=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command}),signal:AbortSignal.timeout(5000)});
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.error??`HTTP ${response.status}`);
+    if(state?.controls){
+      state.controls.can_start=false;
+      if(!state.controls.command||state.controls.command.time<=result.command.time)state.controls.command=result.command;
+    }
+  }catch(error){commandError=`${command==='start'?'Start':'Stop'} unconfirmed: ${error.message}. Check robot state.`}
+  finally{if(command==='start')sendingStart=false;else sendingStop=false;renderControls(state)}
+}
+for(const command of ['start','stop'])$(command).addEventListener('click',()=>sendCommand(command));
 function render(s){
   displayed=s;
   const v=s.latest?.values ?? {}, isFresh=!s.stale && s.connection==='connected';
@@ -73,7 +102,7 @@ function render(s){
   put('rejected',`${s.rejected} REJECTED`);
   $('source').textContent=s.demo?'SIMULATED SOURCE':`${s.broker} · ${s.topics.telemetry}`;
   $('subtitle').textContent=s.custom?'Your Python decoder. Every field, automatically.':'Your robot’s live readings, decoded automatically.';
-  $('footer-detail').textContent=`Receive-only · ${s.custom?'custom Python decoder':'28-byte binary telemetry'} · ${s.retained} retained ignored`;
+  $('footer-detail').textContent=`${s.custom?'Custom Python decoder':'Robot controls · 28-byte binary telemetry'} · ${s.retained} retained ignored`;
   if(s.custom){
     const keys=Object.keys(v).filter(k=>number(v[k])).slice(0,3);
     ['speed','distance','range'].forEach((id,i)=>{put(`metric-label-${i}`,keys[i]?human(keys[i]):'Reading');put(`metric-unit-${i}`,'');put(id,keys[i]?v[keys[i]]:undefined)});
@@ -156,9 +185,10 @@ async function poll(){
     const lastId=samples.at(-1)?.id??0;
     samples.push(...next.samples.filter(sample=>sample.id>lastId));samples=samples.slice(-1200);
     state=next;offset=next.server_time-Date.now()/1000;
+    renderControls(state);
     $('export').disabled=!samples.length;
     if(!paused)render(state);
-  }catch(error){$('banner').hidden=false;$('banner').textContent='Dashboard service unavailable. Keep the Python launcher running; reconnecting automatically.';$('connection').className='pill bad';$('connection').lastElementChild.textContent='Service offline'}
+  }catch(error){renderControls(null);$('banner').hidden=false;$('banner').textContent='Dashboard service unavailable. Keep the Python launcher running; reconnecting automatically.';$('connection').className='pill bad';$('connection').lastElementChild.textContent='Service offline'}
   timer=setTimeout(poll,250);
 }
 $('pause').addEventListener('click',()=>{paused=!paused;document.body.classList.toggle('paused',paused);$('pause').textContent=paused?'▶   Resume view':'Ⅱ   Pause view';$('pause').setAttribute('aria-pressed',String(paused));if(state&&!paused)render(state);if(paused){$('banner').hidden=false;$('banner').textContent='View paused. Telemetry continues collecting. Resume to see current readings.'}});

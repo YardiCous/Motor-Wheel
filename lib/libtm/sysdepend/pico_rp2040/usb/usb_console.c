@@ -31,7 +31,8 @@ IMPORT void	tm_tusb_write_char(char value);
 IMPORT void	tm_tusb_write_flush(void);
 IMPORT void	tm_tusb_discard_input(void);
 
-#define USB_TASK_PRIORITY	3
+/* Robot control and telemetry (priorities 1..8) must preempt USB bursts. */
+#define USB_TASK_PRIORITY	9
 #if TK_SUPPORT_SMP
 #define USB_TASK_STACK		4096
 #else

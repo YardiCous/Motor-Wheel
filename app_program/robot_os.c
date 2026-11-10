@@ -39,6 +39,7 @@
 #define ROBOT_SOURCE_COUNT 6u
 #define ROBOT_COMMAND_MESSAGE_BYTES 5u
 #define ROBOT_COMMAND_DEPTH 8u
+#define ROBOT_PERCEPTION_BUDGET 4u
 #define ROBOT_TASK_STACK 2048
 #define ROBOT_SOURCE_MOTION 0u
 #define ROBOT_SOURCE_IMU 1u
@@ -66,7 +67,7 @@ typedef struct
     bool     b_line_ready : 1;
     uint32_t sequence : 4;
     bool     b_sequence_valid : 1;
-    bool     b_queue_fault : 1;
+    uint32_t queue_faults : 4;
     bool     b_range_fault : 1;
     bool     b_remote_armed : 1;
     bool     b_network_online : 1;
@@ -88,6 +89,16 @@ typedef struct
     uint8_t candidate : 3;
     uint8_t previous : 3;
 } buttons_t;
+
+/** @brief Bounded evidence from the first watchdog trip until reset. */
+typedef struct
+{
+    uint32_t at_ms;
+    uint32_t ages[ROBOT_HEARTBEATS];
+    uint8_t  ready : 2;
+    bool     b_captured : 1;
+    bool     b_pending : 1;
+} watchdog_t;
 
 #if OBSTACLE_TEST
 /** @brief Console progress tracking for the bench obstacle test. */
@@ -121,6 +132,7 @@ static volatile shared_t g_shared                               = {0};
 static volatile uint8_t  g_packet[DATA_FORMATS_TELEMETRY_BYTES] = {0u};
 static volatile uint8_t  g_sources[9]                           = {0u};
 static volatile uint32_t g_heartbeat[ROBOT_HEARTBEATS]          = {0u};
+static volatile watchdog_t g_watchdog                          = {0};
 static ID                gh_tasks[ROBOT_TASK_COUNT]             = {0};
 static ID                gh_motion_queue                        = 0;
 static ID                gh_barcode_queue                       = 0;
@@ -137,6 +149,8 @@ static uint32_t field_read(uint16_t offset, uint8_t width);
 static void     field_write(uint16_t offset, uint8_t width, uint32_t value);
 static void     fault_source(uint8_t source, uint16_t faults);
 static void     heartbeat(uint8_t source);
+static void     watchdog_capture(uint32_t now, const uint32_t * p_ages);
+static void     watchdog_report(void);
 static void     wait_release(void);
 static void     cyclic_isr(void * p_argument);
 static ID       create_queue(int32_t capacity, int32_t message_size);
@@ -275,7 +289,7 @@ bool robot_os_submit(uint8_t payload)
     if ((!b_valid) && (0u == (payload & 0xc0u)))
     {
         uint32_t mask          = board_io_lock();
-        g_shared.b_queue_fault = true;
+        g_shared.queue_faults |= 1u;
         board_io_unlock(mask);
         (void)tk_wup_tsk(gh_tasks[0]);
     }
@@ -363,6 +377,65 @@ static void heartbeat(uint8_t source)
     uint32_t mask       = board_io_lock();
     g_heartbeat[source] = now;
     board_io_unlock(mask);
+}
+
+/** @brief Save fault-time ages without console work in the safety task. */
+static void watchdog_capture(uint32_t now, const uint32_t * p_ages)
+{
+    uint32_t mask = board_io_lock();
+
+    if (!g_watchdog.b_captured)
+    {
+        g_watchdog.at_ms = now;
+
+        for (uint8_t source = 0u; source < ROBOT_HEARTBEATS; ++source)
+        {
+            g_watchdog.ages[source] = p_ages[source];
+        }
+
+        g_watchdog.ready = (g_shared.b_line_ready ? 1u : 0u) |
+                           (g_shared.b_imu_ready ? 2u : 0u);
+        g_watchdog.b_captured = true;
+        g_watchdog.b_pending  = true;
+    }
+
+    board_io_unlock(mask);
+}
+
+/** @brief Repeat saved evidence so opening the serial monitor late works. */
+static void watchdog_report(void)
+{
+    static uint32_t report_at_ms = 0u;
+    uint32_t now = board_io_time_ms();
+    uint32_t mask = board_io_lock();
+    watchdog_t report = g_watchdog;
+    uint32_t queue_faults = g_shared.queue_faults;
+    g_watchdog.b_pending = false;
+    board_io_unlock(mask);
+    bool b_fault = (report.b_captured) || (0u != queue_faults);
+    bool b_due = (now - report_at_ms) >= 1000u;
+
+    if ((report.b_pending) || (b_fault && b_due))
+    {
+        report_at_ms = now;
+
+        if (report.b_captured)
+        {
+            tm_printf((UB *)"WATCHDOG: ms=%u motion=%u line=%u imu=%u "
+                            "nav=%u scan=%u ready=%u\n",
+                      (unsigned)report.at_ms, (unsigned)report.ages[0],
+                      (unsigned)report.ages[1], (unsigned)report.ages[2],
+                      (unsigned)report.ages[3], (unsigned)report.ages[4],
+                      (unsigned)report.ready);
+        }
+
+        if (0u != queue_faults)
+        {
+            tm_printf((UB *)"QUEUE: sources=0x%x "
+                            "(command=1 line=2 imu=4 motion=8)\n",
+                      (unsigned)queue_faults);
+        }
+    }
 }
 
 /** @brief Collapse excess releases instead of running catch-up bursts. */
@@ -471,13 +544,25 @@ static void safety_task(INT start, void * p_argument)
         bool     b_ready = (g_shared.b_imu_ready) && (g_shared.b_line_ready);
         bool     b_reset = g_shared.b_reset;
         uint32_t grace   = now - g_shared.reset_at_ms;
+        uint32_t ages[ROBOT_HEARTBEATS] = {0u};
+
+        for (uint8_t source = 0u; source < ROBOT_HEARTBEATS; ++source)
+        {
+            ages[source] = now - g_heartbeat[source];
+        }
+
         bool     b_stale =
-            ((now - g_heartbeat[0]) > 20u) || ((now - g_heartbeat[1]) > 20u) ||
-            ((now - g_heartbeat[2]) > 20u) || ((now - g_heartbeat[3]) > 40u) ||
-            ((now - g_heartbeat[4]) > 180u);
+            (ages[0] > 20u) || (ages[1] > 20u) || (ages[2] > 20u) ||
+            (ages[3] > 40u) || (ages[4] > 180u);
         board_io_unlock(mask);
         bool b_watchdog = (b_boot_complete && (!b_reset) && b_stale) ||
                           ((grace > 2000u) && (b_stale || (!b_ready)));
+
+        if (b_watchdog)
+        {
+            watchdog_capture(now, ages);
+        }
+
         fault_source(ROBOT_SOURCE_TIMING,
                      b_watchdog ? DATA_FORMATS_FAULT_WATCHDOG : 0u);
         uint16_t active = current_faults();
@@ -489,6 +574,12 @@ static void safety_task(INT start, void * p_argument)
             b_boot_complete  = b_boot_complete || b_clear;
             mask             = board_io_lock();
             g_shared.b_reset = !b_clear;
+
+            if (b_clear)
+            {
+                g_watchdog.b_captured = false;
+            }
+
             board_io_unlock(mask);
         }
 
@@ -784,6 +875,8 @@ static void telemetry_task(INT start, void * p_argument)
             (void)tk_rcv_mbf(gh_telemetry_queue, discarded, TMO_POL);
             (void)tk_snd_mbf(gh_telemetry_queue, packet, 32, TMO_POL);
         }
+
+        watchdog_report();
     }
 }
 
@@ -940,7 +1033,7 @@ static void barcode_reset(void)
     uint32_t mask           = board_io_lock();
     g_shared.b_reset        = true;
     g_shared.b_reset_motion = true;
-    g_shared.b_queue_fault  = false;
+    g_shared.queue_faults   = 0u;
     g_shared.b_range_fault  = false;
     g_shared.reset_at_ms    = board_io_time_ms();
     board_io_unlock(mask);
@@ -1013,11 +1106,16 @@ static void line_events(line_t * p_line, scanner_t * p_reader, uint16_t raw,
     uint32_t left  = 0u;
     uint32_t right = 0u;
     (void)board_io_encoders(&left, &right);
-    bool b_on   = (LINE_CALIBRATING != p_line->state) && (!b_departure);
+    uint32_t vehicle = field_read(2u, 3u);
+    bool b_running = (DATA_FORMATS_FOLLOW == vehicle) ||
+                     (DATA_FORMATS_HUMP == vehicle);
+    bool b_on = (LINE_CALIBRATING != p_line->state) && (!b_departure) &&
+                b_running;
     char letter = scanner_step(
         p_reader, raw, (uint16_t)p_line->threshold_right, left, right, b_on);
-    bool b_arrived = (LINE_JUNCTION == p_line->state) && (!*pb_junction);
-    *pb_junction   = (LINE_JUNCTION == p_line->state);
+    bool b_junction = b_on && (LINE_JUNCTION == p_line->state);
+    bool b_arrived = b_junction && (!*pb_junction);
+    *pb_junction   = b_junction;
 
     if (b_arrived && ('\0' == letter))
     {
@@ -1040,7 +1138,7 @@ static void line_event(uint8_t event)
 {
     ER       result        = tk_snd_mbf(gh_barcode_queue, &event, 1, TMO_POL);
     uint32_t mask          = board_io_lock();
-    g_shared.b_queue_fault = (g_shared.b_queue_fault) || ((E_OK != result));
+    g_shared.queue_faults |= (E_OK != result) ? 2u : 0u;
     board_io_unlock(mask);
 }
 #endif /* BARCODE_TEST */
@@ -1107,8 +1205,7 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
         (void)data_formats_write(event, 9u, 1u, p_terrain->b_hump_valid);
         ER result = tk_snd_mbf(gh_imu_queue, event, 2, TMO_POL);
         mask      = board_io_lock();
-        g_shared.b_queue_fault =
-            (g_shared.b_queue_fault) || ((E_OK != result));
+        g_shared.queue_faults |= (E_OK != result) ? 4u : 0u;
         board_io_unlock(mask);
     }
 
@@ -1127,16 +1224,22 @@ static void navigation_cycle(navigation_t * p_navigation)
 {
     uint8_t event = 0u;
 
-    /* Letters and junctions, oldest first. */
-    while (1 == tk_rcv_mbf(gh_barcode_queue, &event, TMO_POL))
+    /* Bound work even when the higher-priority line task keeps producing. */
+    for (uint8_t handled = 0u;
+         (handled < ROBOT_PERCEPTION_BUDGET) &&
+         (1 == tk_rcv_mbf(gh_barcode_queue, &event, TMO_POL));
+         ++handled)
     {
         char pending = p_navigation->junction.pending;
 
         if (JUNCTION_EVENT == event)
         {
             uint8_t action = navigation_junction(p_navigation);
-            tm_printf((UB *)"JUNCTION: barcode '%c' -> %s\n", pending,
-                      (UB *)junction_name(action));
+            if (JUNCTION_IGNORED != action)
+            {
+                tm_printf((UB *)"JUNCTION: barcode '%c' -> %s\n", pending,
+                          (UB *)junction_name(action));
+            }
         }
         else if (navigation_letter(p_navigation, (char)event))
         {
@@ -1352,8 +1455,7 @@ static void dispatch_navigation(navigation_t * p_navigation)
         (void)data_formats_write(message, 0u, 24u, p_navigation->command);
         ER result = tk_snd_mbf(gh_motion_queue, message, 3, TMO_POL);
         mask      = board_io_lock();
-        g_shared.b_queue_fault =
-            (g_shared.b_queue_fault) || ((E_OK != result));
+        g_shared.queue_faults |= (E_OK != result) ? 8u : 0u;
         board_io_unlock(mask);
         p_navigation->b_command_ready = false;
     }
@@ -1373,7 +1475,7 @@ static void dispatch_navigation(navigation_t * p_navigation)
         g_shared.b_reset_motion         = true;
         g_shared.b_reset_imu            = true;
         g_shared.b_reset_scan           = true;
-        g_shared.b_queue_fault          = false;
+        g_shared.queue_faults           = 0u;
         g_shared.b_range_fault          = false;
         g_shared.b_scan_request         = false;
         g_shared.reset_at_ms            = g_heartbeat[3];
@@ -1921,7 +2023,7 @@ static uint16_t current_faults(void)
         faults |= data_formats_read(g_sources, source * 12u, 12u);
     }
 
-    faults |= g_shared.b_queue_fault ? DATA_FORMATS_FAULT_QUEUE : 0u;
+    faults |= (0u != g_shared.queue_faults) ? DATA_FORMATS_FAULT_QUEUE : 0u;
     faults |= g_shared.b_range_fault ? DATA_FORMATS_FAULT_RANGE : 0u;
     board_io_unlock(mask);
     /* Six twelve-bit sources cannot set a bit above bit eleven. */

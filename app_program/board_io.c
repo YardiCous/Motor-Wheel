@@ -174,12 +174,12 @@ uint32_t board_io_time_us(void)
     return read_reg(BOARD_TIMER + 0x28u);
 }
 
-/** @brief Kernel time avoids deriving milliseconds from a wrapping us timer.
+/** @brief Operating time is monotonic and independent of wall-clock changes.
  */
 uint32_t board_io_time_ms(void)
 {
     SYSTIM time = {0};
-    (void)tk_get_tim(&time);
+    (void)tk_get_otm(&time);
     return time.lo;
 }
 

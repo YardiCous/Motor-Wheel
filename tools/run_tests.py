@@ -65,11 +65,28 @@ def run(executable):
     return subprocess.check_output([str(executable)], text=True, env=environment)
 
 
+def build_robot_os(root, executable):
+    # ASan's global registration would retain the unused RTOS task-entry
+    # table and prevent linking just the real functions under test.
+    command = [os.environ.get("CC", "gcc"), *FLAGS, "-g", "-O1",
+               "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+               "--param=asan-globals=0",
+               "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections",
+               "-I" + str(root / "testing/robot_os"),
+               str(root / "testing/robot_os/verify_startup.c"),
+               str(root / "app_program/data_formats.c"),
+               str(root / "app_program/subsystem3/scanner.c"),
+               str(root / "app_program/subsystem3/code39.c"),
+               "-o", str(executable)]
+    subprocess.run(command, check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     subprocess.run([sys.executable, str(ROOT / "tools/check_barr.py")], check=True)
+    subprocess.run([sys.executable, str(ROOT / "tools/check_task_priorities.py")], check=True)
     with tempfile.TemporaryDirectory(prefix="motor-test-") as temporary:
         executable = Path(temporary) / "verify"
         build(ROOT, executable)
@@ -80,6 +97,9 @@ def main():
         clock_executable = Path(temporary) / "verify_clock"
         build_clock(ROOT, clock_executable)
         output += run(clock_executable)
+        os_executable = Path(temporary) / "verify_robot_os"
+        build_robot_os(ROOT, os_executable)
+        output += run(os_executable)
         bench_executable = Path(temporary) / "verify_bench"
         build(ROOT, bench_executable, bench=True)
         output += run(bench_executable)

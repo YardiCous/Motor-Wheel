@@ -93,7 +93,7 @@ and the units for biased fields are described below and in the headers.
 | robot_os / shared_t | `b_line_ready` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `sequence` | 0..15 | 4 | unsigned bit-field |
 | robot_os / shared_t | `b_sequence_valid` | 0..1 | 1 | bool bit-field |
-| robot_os / shared_t | `b_queue_fault` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `queue_faults` | 0..15 | 4 | unsigned bit-field |
 | robot_os / shared_t | `b_range_fault` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_remote_armed` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_network_online` | 0..1 | 1 | bool bit-field |
@@ -104,6 +104,10 @@ and the units for biased fields are described below and in the headers.
 | robot_os / buttons_t | `stable_count` | 0..3 | 2 | unsigned bit-field |
 | robot_os / buttons_t | `candidate` | 0..7 | 3 | unsigned bit-field |
 | robot_os / buttons_t | `previous` | 0..7 | 3 | unsigned bit-field |
+| robot_os / watchdog_t | `ready` | 0..3 | 2 | unsigned bit-field |
+| robot_os / watchdog_t | `b_captured` | 0..1 | 1 | bool bit-field |
+| robot_os / watchdog_t | `b_pending` | 0..1 | 1 | bool bit-field |
+| robot_os / watchdog_t | `at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / bench_t | `report_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / bench_t | `start_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / bench_t | `start_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |

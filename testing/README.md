@@ -1,5 +1,10 @@
 # CSC20 verification
 
+The host runner checks that every robot task outranks USB and WiFi, catching
+service-priority changes that could starve Navigation. The real board driver
+is tested with a changing wall-clock offset: control time must follow kernel
+operating time instead.
+
 Run `python3 tools/run_tests.py` from the repository root for the instrumented
 host logic tests. Run `python3 tools/measure_memory.py` for the equivalent wide
 baseline and ARM layout measurements, and `python3 tools/measure_messages.py`
@@ -31,6 +36,14 @@ The real `startup_clock()` is also compiled against mocked clock registers.
 It must set the 1-us watchdog/timer tick after choosing the 12-MHz reference
 for cold-reset, USB-boot, disabled-tick and incorrect-divider initial states,
 without enabling the watchdog reset countdown.
+
+OS startup regressions compile the real `robot_os.c` with mocked RTOS calls.
+They replay 30,000 changing line samples across boot, idle and fault states
+without mission events or queue overflow, then check junction delivery while
+following, fatal queue overflow and its source mask. Saved watchdog ages
+must survive later healthy samples, repeat once per second for a late-opened
+serial monitor, and stop repeating after reset. Line logic checks also put
+black tape under every sensor at boot and require all 32 calibration samples.
 
 For a direct bench check of the real motors, build and flash the opt-in
 sequence with `MOTOR_TEST=1`:

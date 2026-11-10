@@ -11,15 +11,17 @@ import tempfile
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools/dashboard'))
 import telemetry_dashboard as dashboard
 
 VECTOR = bytes.fromhex('e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e')
-TOPICS = {'telemetry': 'robot/telemetry', 'status': 'robot/status', 'ack': 'robot/ack'}
+TOPICS = {'telemetry': 'robot/telemetry', 'status': 'robot/status', 'ack': 'robot/ack',
+          'command': 'robot/command'}
 
 
 def with_field(packet, offset, width, value):
@@ -163,9 +165,164 @@ class StateTests(unittest.TestCase):
             state.ingest(TOPICS['telemetry'], b'anything')
             self.assertEqual(state.snapshot()['rejected'], 1)
             self.assertEqual(state.snapshot()['received'], 0)
+        state = dashboard.Telemetry(lambda _: {'link': 'online'}, topics=TOPICS, custom=True)
+        state.ingest(TOPICS['telemetry'], b'custom')
+        self.assertEqual(state.snapshot()['latest']['values']['link'], 'online')
+        self.assertFalse(state.snapshot()['controls']['can_start'])
+
+
+class CommandTests(unittest.TestCase):
+    def setUp(self):
+        self.sent = []
+        self.state = dashboard.Telemetry(topics=TOPICS)
+        self.state.publish_command = self.publish
+        self.state.set_connection('connected', 'Test broker')
+        self.state.ingest(TOPICS['telemetry'], with_field(VECTOR, 37, 12, 0))
+
+    def publish(self, topic, payload, **options):
+        self.sent.append((topic, payload, options))
+        return SimpleNamespace(rc=0)
+
+    def acknowledge(self, command, accepted=True, **options):
+        value = dashboard.encode_command(command['name'], command['sequence'])[0]
+        self.state.ingest(TOPICS['ack'], bytes([value | (64 if accepted else 0)]), **options)
+
+    def test_stop_then_start_and_sequence_wrap(self):
+        with self.assertRaises(ValueError):
+            self.state.send_command('start')
+        self.state.next_sequence = 15
+        stop = self.state.send_command('stop')
+        self.assertFalse(self.state.snapshot()['controls']['can_start'])
+        self.acknowledge(stop, retained=True)
+        self.assertFalse(self.state.snapshot()['controls']['can_start'])
+        self.acknowledge(stop)
+        self.assertTrue(self.state.snapshot()['controls']['can_start'])
+        start = self.state.send_command('start')
+        self.assertEqual(start['sequence'], 0)
+        self.acknowledge(start)
+        self.assertEqual(self.state.snapshot()['controls']['command']['status'], 'accepted')
+        self.assertEqual(self.sent, [
+            (TOPICS['command'], b'\x3c', {'qos': 0, 'retain': False}),
+            (TOPICS['command'], b'\x01', {'qos': 0, 'retain': False})])
+
+    def test_stop_resynchronizes_every_firmware_sequence(self):
+        for last_sequence in range(16):
+            with self.subTest(last_sequence=last_sequence):
+                self.setUp()
+                command = self.state.send_command('stop')
+                for _ in range(3):
+                    accepted = 1 <= (command['sequence'] - last_sequence) % 16 <= 7
+                    self.acknowledge(command, accepted=accepted)
+                    command = self.state.snapshot()['controls']['command']
+                    if accepted:
+                        break
+                self.assertEqual(command['status'], 'accepted')
+                self.assertTrue(self.state.snapshot()['controls']['can_start'])
+                self.assertTrue(all(payload[0] & 3 == 0 for _, payload, _ in self.sent))
+
+    def test_stop_preempts_pending_start_and_start_is_never_retried(self):
+        self.acknowledge(self.state.send_command('stop'))
+        start = self.state.send_command('start')
+        with self.assertRaises(ValueError):
+            self.state.send_command('start')
+        stop = self.state.send_command('stop')
+        self.acknowledge(start)
+        self.assertEqual(self.state.snapshot()['controls']['command']['status'], 'pending')
+        self.acknowledge(stop)
+        self.assertTrue(self.state.snapshot()['controls']['can_start'])
+        start = self.state.send_command('start')
+        self.assertEqual(start['sequence'], (stop['sequence'] + 1) % 16)
+        self.acknowledge(start, accepted=False)
+        self.assertEqual(len(self.sent), 4)
+        self.assertEqual(self.state.snapshot()['controls']['command']['status'], 'rejected')
+
+    def test_disconnect_staleness_timeout_and_publish_failure(self):
+        self.acknowledge(self.state.send_command('stop'))
+        self.state.history[-1]['time'] -= 3
+        self.assertFalse(self.state.snapshot()['controls']['can_start'])
+        self.assertTrue(self.state.snapshot()['controls']['can_stop'])
+        self.state.send_command('stop')
+        self.state.command['time'] -= dashboard.COMMAND_TIMEOUT + 1
+        self.assertEqual(self.state.snapshot()['controls']['command']['status'], 'unconfirmed')
+        self.state.set_connection('disconnected', 'Test outage')
+        with self.assertRaises(ValueError):
+            self.state.send_command('stop')
+        self.state.set_connection('connected', 'Reconnected')
+        self.state.publish_command = lambda *args, **kwargs: SimpleNamespace(rc=4)
+        with self.assertRaises(ValueError):
+            self.state.send_command('stop')
+        self.assertFalse(self.state.snapshot()['controls']['can_start'])
+
+    def test_watchdog_blocks_start_but_not_stop(self):
+        self.acknowledge(self.state.send_command('stop'))
+        # faults starts at bit 37; watchdog is bit 7 of that field.
+        self.state.ingest(TOPICS['telemetry'], with_field(VECTOR, 37, 12, 0x080))
+        controls = self.state.snapshot()['controls']
+        self.assertFalse(controls['can_start'])
+        self.assertTrue(controls['can_stop'])
+        self.assertIn('Watchdog', controls['detail'])
+        self.assertIn('0x080', controls['detail'])
+        with self.assertRaisesRegex(ValueError, 'Watchdog'):
+            self.state.send_command('start')
+        self.state.send_command('stop')
+
+    def test_network_advisories_do_not_block_start(self):
+        self.state.ingest(TOPICS['telemetry'], with_field(VECTOR, 37, 12, 0x810))
+        self.acknowledge(self.state.send_command('stop'))
+        self.assertTrue(self.state.snapshot()['controls']['can_start'])
+
+    def test_unrelated_ack_demo_custom_and_unknown_commands(self):
+        stop = self.state.send_command('stop')
+        self.acknowledge(dict(stop, sequence=(stop['sequence'] + 1) % 16))
+        self.assertFalse(self.state.snapshot()['controls']['can_start'])
+        self.acknowledge(stop)
+        for mode in ['demo', 'custom']:
+            setattr(self.state, mode, True)
+            for name in ['start', 'stop']:
+                with self.assertRaises(ValueError):
+                    self.state.send_command(name)
+            setattr(self.state, mode, False)
+        with self.assertRaises(ValueError):
+            self.state.send_command('estop')
 
 
 class HTTPTests(unittest.TestCase):
+    def test_command_api_validation_and_delivery(self):
+        state = dashboard.Telemetry(topics=TOPICS)
+        sent = []
+        state.publish_command = lambda *args, **kwargs: sent.append(args) or SimpleNamespace(rc=0)
+        state.set_connection('connected', 'Test broker')
+        server = dashboard.ThreadingHTTPServer(('127.0.0.1', 0), dashboard.make_handler(state))
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        url = f'http://127.0.0.1:{server.server_port}/api/command'
+        try:
+            cases = [(b'{"command":"start"}', {}, 409),
+                     (b'{"command":"reset"}', {}, 400),
+                     (b'invalid', {}, 400),
+                     (b'[]', {}, 400),
+                     (b' ' * 129, {}, 400),
+                     (b'{"command":"stop"}', {'Origin': 'https://example.com'}, 403),
+                     (b'{"command":"stop"}', {'Host': 'example.com'}, 403),
+                     (b'{"command":"stop"}', {'Content-Type': 'text/plain'}, 415)]
+            for body, headers, status in cases:
+                with self.subTest(status=status, body=body):
+                    request = Request(url, data=body, headers={'Content-Type': 'application/json', **headers})
+                    with self.assertRaises(HTTPError) as error:
+                        urlopen(request)
+                    self.assertEqual(error.exception.code, status)
+                    error.exception.close()
+            self.assertEqual(sent, [])
+            request = Request(url, data=b'{"command":"stop"}', headers={'Content-Type': 'application/json'})
+            with urlopen(request) as response:
+                self.assertEqual(response.status, 202)
+                self.assertEqual(json.load(response)['command']['status'], 'pending')
+            self.assertEqual(sent, [(TOPICS['command'], b'\x00')])
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join()
+
     def test_api_and_dashboard_routes(self):
         state = dashboard.Telemetry(topics=TOPICS)
         state.ingest(TOPICS['telemetry'], VECTOR)
@@ -187,6 +344,7 @@ class HTTPTests(unittest.TestCase):
                 with self.assertRaises(HTTPError) as error:
                     urlopen(url + path)
                 self.assertEqual(error.exception.code, status)
+                error.exception.close()
         finally:
             server.shutdown()
             server.server_close()
@@ -218,6 +376,7 @@ MQTT_AVAILABLE = importlib.util.find_spec('paho') is not None and shutil.which('
 class MQTTTests(unittest.TestCase):
     def test_subscribe_reject_and_reconnect(self):
         import paho.mqtt.client as mqtt
+        live_packet = with_field(VECTOR, 37, 12, 0)
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             port = probe.getsockname()[1]
@@ -255,8 +414,26 @@ class MQTTTests(unittest.TestCase):
             broker = start_broker()
             until(lambda: state.snapshot()['connection'] == 'connected')
             publisher = new_publisher()
-            publisher.publish(TOPICS['telemetry'], VECTOR, qos=1).wait_for_publish(3)
+            commands = []
+            publisher.on_message = lambda client, userdata, message: commands.append(
+                (message.payload, message.retain, message.qos))
+            subscribed = threading.Event()
+            publisher.on_subscribe = lambda *args: subscribed.set()
+            publisher.subscribe(TOPICS['command'])
+            self.assertTrue(subscribed.wait(3))
+            publisher.publish(TOPICS['telemetry'], live_packet, qos=1).wait_for_publish(3)
             until(lambda: state.snapshot()['received'] == 1)
+            command = state.send_command('stop')
+            until(lambda: len(commands) == 1)
+            self.assertEqual(commands[0], (dashboard.encode_command('stop', command['sequence']), False, 0))
+            self.assertEqual(state.snapshot()['controls']['command']['status'], 'pending')
+            publisher.publish(TOPICS['ack'], bytes([commands[0][0][0] | 64]), qos=1).wait_for_publish(3)
+            until(lambda: state.snapshot()['controls']['can_start'])
+            command = state.send_command('start')
+            until(lambda: len(commands) == 2)
+            self.assertEqual(commands[1], (dashboard.encode_command('start', command['sequence']), False, 0))
+            publisher.publish(TOPICS['ack'], bytes([commands[1][0][0] | 64]), qos=1).wait_for_publish(3)
+            until(lambda: state.snapshot()['controls']['command']['status'] == 'accepted')
             publisher.publish(TOPICS['telemetry'], b'bad', qos=1).wait_for_publish(3)
             until(lambda: state.snapshot()['rejected'] == 1)
             publisher.disconnect()
@@ -268,8 +445,11 @@ class MQTTTests(unittest.TestCase):
             broker = start_broker()
             until(lambda: state.snapshot()['connection'] == 'connected')
             publisher = new_publisher()
-            publisher.publish(TOPICS['telemetry'], VECTOR, qos=1).wait_for_publish(3)
+            publisher.publish(TOPICS['telemetry'], live_packet, qos=1).wait_for_publish(3)
             until(lambda: state.snapshot()['received'] == 2)
+            self.assertEqual(len(commands), 2)  # No command is replayed on reconnect.
+            self.assertFalse(state.snapshot()['controls']['can_start'])
+            self.assertTrue(state.snapshot()['controls']['can_stop'])
             self.assertEqual(state.snapshot()['latest']['values']['pitch_deg'], -5.0)
         finally:
             if publisher:

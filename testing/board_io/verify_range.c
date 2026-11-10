@@ -11,6 +11,7 @@
 #define IO 0x40014000u
 #define TIMER 0x40054000u
 static uint32_t now_us;
+static uint32_t wall_offset_ms;
 static uint32_t gpio_inputs;
 static uint32_t pending_edges;
 static uint32_t enabled_edges;
@@ -81,6 +82,12 @@ void EnableInt(uint32_t number, int level)
 
 int tk_get_tim(SYSTIM *time)
 {
+    time->lo = now_us / 1000u + wall_offset_ms;
+    return E_OK;
+}
+
+int tk_get_otm(SYSTIM *time)
+{
     time->lo = now_us / 1000u;
     return E_OK;
 }
@@ -128,6 +135,13 @@ static void measure(uint32_t width_us, uint16_t expected_cm)
 
 int main(void)
 {
+    now_us = 2000000u;
+    wall_offset_ms = 3355770000u;
+    assert(board_io_time_ms() == 2000u);
+    wall_offset_ms = 7u;
+    now_us += 10000u;
+    assert(board_io_time_ms() == 2010u);
+    now_us = 0u;
     assert(board_io_init(7));
     measure(1160u, 20u);
     measure(1740u, 30u);

@@ -9,12 +9,16 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ["data_formats.c", "subsystem1/telemetry.c", "subsystem2/motion.c",
         "subsystem3/line.c", "subsystem4/safety.c", "subsystem4/terrain.c",
-        "subsystem5/navigation.c", "subsystem5/obstacle.c"]
+        "subsystem5/junction.c", "subsystem5/navigation.c",
+        "subsystem5/obstacle.c"]
 FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Werror", "-Wshadow",
          "-Wstrict-prototypes", "-Wmissing-prototypes", "-Wsign-conversion",
          "-pedantic", "-DROBOT_ENCODER_EDGES_TURN=960u",
          "-DROBOT_TRACK_MM=140u", "-DROBOT_QUARTER_TURN_MM=109u",
-         "-DROBOT_LINE_STRADDLE=0u"]
+         "-DROBOT_LINE_STRADDLE=0u", "-DROBOT_LINE_FRAMED_BARCODE=1u",
+         "-DROBOT_CRUISE_MM_SECOND=500u", "-DROBOT_CAUTIOUS_MM_SECOND=250u",
+         "-DROBOT_TURN_MM_SECOND=150u", "-DROBOT_SEARCH_MS=3000u",
+         "-DROBOT_BYPASS_MAX_STEPS=12u"]
 
 
 def build(root, executable, sanitize=True, bench=False):
@@ -95,4 +99,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

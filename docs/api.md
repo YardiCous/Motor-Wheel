@@ -356,6 +356,7 @@ typedef struct
     uint16_t narrowest_wide;
     bool     b_reversed;
     bool     b_partial;
+    uint8_t  skipped;
     char     letter;
 } code39_result_t;
 
@@ -405,6 +406,34 @@ Process 12-bit ADC samples and modulo-4096 encoder distance.
 `int16_t line_error(const line_t * p_line);`
 
 Return steering -127..127, with validity stored separately.
+
+## app_program/subsystem3/scanner.h
+
+`void scanner_init(scanner_t * p_reader);`
+
+Private to the line task. */
+typedef struct
+{
+    uint16_t widths[CODE39_MAX_ELEMENTS];
+    uint32_t last_left;
+    uint32_t last_right;
+    uint32_t element_edges;
+    uint16_t longest;
+    uint8_t  count;
+    bool     b_black;
+    bool     b_scanning;
+    bool     b_started;
+} scanner_t;
+
+/** @brief Forget any scan; the first step only records the encoders.
+
+`char scanner_step(scanner_t * p_reader, uint16_t raw, uint16_t threshold, uint32_t left, uint32_t right, bool b_enabled);`
+
+One GP28 sample with the wheel encoder totals. Returns the letter 'A'..'Z' once when a scan decodes to one, otherwise '\0'. With b_enabled false (turning, avoiding) any scan in progress is dropped.
+
+`char scanner_flush(scanner_t * p_reader);`
+
+End the scan now (junction reached): its letter or '\0'.
 
 ## app_program/subsystem4/drv_lsm303.h
 
@@ -596,6 +625,46 @@ Integer atan2 in 0.01 deg, error under 0.1 deg. @pre |y| and |x| are below 2^19.
 
 Integer square root, rounded down.
 
+## app_program/subsystem5/junction.h
+
+`void junction_init(junction_t * p_junction);`
+
+"No barcode since the last junction". */
+#define JUNCTION_NONE '$'
+/** @brief Queue byte meaning "the line sensors have reached a junction". */
+#define JUNCTION_EVENT '#'
+
+#define JUNCTION_FORWARD 0u
+#define JUNCTION_LEFT 1u
+#define JUNCTION_RIGHT 2u
+#define JUNCTION_UTURN 3u
+/** @brief navigation_junction() result when the robot was not following. */
+#define JUNCTION_IGNORED 4u
+
+/** @brief The remembered letter, or JUNCTION_NONE. */
+typedef struct
+{
+    char pending;
+} junction_t;
+
+/** @brief Start with nothing remembered ('$').
+
+`bool junction_store(junction_t * p_junction, char letter);`
+
+Remember an A..Z letter; anything else is refused.
+
+`uint8_t junction_take(junction_t * p_junction);`
+
+The action for the remembered letter; memory goes back to '$'.
+
+`uint8_t junction_action(char letter);`
+
+Table lookup: A..Z gives its action, anything else FORWARD.
+
+`const char * junction_name(uint8_t action);`
+
+"FORWARD", "LEFT", "RIGHT", "U-TURN" or "IGNORED".
+
 ## app_program/subsystem5/navigation.h
 
 `void navigation_init(navigation_t * p_navigation);`
@@ -633,6 +702,8 @@ typedef struct
     uint16_t body_ranges[OBSTACLE_BODY_POINTS];
     uint8_t scan_failure;
     uint32_t command;
+    /* Last barcode letter, or '$' (JUNCTION_NONE) once used at a junction. */
+    junction_t junction;
 } navigation_t;
 
 /** @brief Reach IDLE locally without waiting for WiFi.
@@ -644,6 +715,14 @@ Validate START/STOP/RESET/E-stop against the current state.
 `void navigation_barcode(navigation_t * p_navigation, uint8_t barcode);`
 
 Consume one barcode once, pre-empting line following.
+
+`bool navigation_letter(navigation_t * p_navigation, char letter);`
+
+Remember a barcode letter for the next junction.
+
+`uint8_t navigation_junction(navigation_t * p_navigation);`
+
+The line sensors reached a junction: use the remembered letter ('$' carries straight on). Returns the JUNCTION_* action taken, or JUNCTION_IGNORED (letter kept) when the robot was not following the line.
 
 `bool navigation_obstacle_plan(navigation_t * p_navigation, uint16_t width_mm, uint16_t left_cm, uint16_t right_cm);`
 
@@ -736,6 +815,12 @@ Decode synthetic barcodes: letters, reversal, drift and faults.
 `void motor_test_run(void);`
 
 Validate the operator movement sequence without energizing hardware.
+
+## testing/host/route_host.h
+
+`int main(void);`
+
+Run every check; asserts on failure.
 
 ## testing/host/terrain_test.h
 

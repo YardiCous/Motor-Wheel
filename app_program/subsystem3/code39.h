@@ -39,6 +39,7 @@ typedef struct
     uint16_t narrowest_wide;
     bool     b_reversed;
     bool     b_partial;
+    uint8_t  skipped;
     char     letter;
 } code39_result_t;
 

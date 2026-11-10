@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "junction.h"
 #include "obstacle.h"
 
 /** @brief Task-private mission state uses eight values exactly. */
@@ -42,6 +43,8 @@ typedef struct
     uint16_t body_ranges[OBSTACLE_BODY_POINTS];
     uint8_t scan_failure;
     uint32_t command;
+    /* Last barcode letter, or '$' (JUNCTION_NONE) once used at a junction. */
+    junction_t junction;
 } navigation_t;
 
 /** @brief Reach IDLE locally without waiting for WiFi. */
@@ -51,6 +54,13 @@ bool navigation_supervise(navigation_t * p_navigation, uint8_t command,
                           bool b_safety_latched);
 /** @brief Consume one barcode once, pre-empting line following. */
 void navigation_barcode(navigation_t * p_navigation, uint8_t barcode);
+/** @brief Remember a barcode letter for the next junction. */
+bool navigation_letter(navigation_t * p_navigation, char letter);
+/** @brief The line sensors reached a junction: use the remembered letter
+ * ('$' carries straight on). Returns the JUNCTION_* action taken, or
+ * JUNCTION_IGNORED (letter kept) when the robot was not following the line.
+ */
+uint8_t navigation_junction(navigation_t * p_navigation);
 /** @brief Accept a bounded width and side clearances for a pending bypass. */
 bool navigation_obstacle_plan(navigation_t * p_navigation, uint16_t width_mm,
                                uint16_t left_cm, uint16_t right_cm);

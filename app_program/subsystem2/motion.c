@@ -131,6 +131,13 @@ bool motion_accept(motion_t * p_motion, uint32_t command)
         p_motion->prior_left           = 1000u;
         p_motion->prior_right          = 1000u;
     }
+    else if (b_valid && (MOTION_FOLLOW == mode) &&
+             (MOTION_FOLLOW == p_motion->mode) && (speed > 0u))
+    {
+        /* Already following: a new speed (barcode or hump slow zone) must
+         * not restart the wheel controllers, which would surge the motors. */
+        p_motion->speed = speed;
+    }
     else if (b_valid && b_available && (speed > 0u))
     {
         p_motion->mode                 = mode;

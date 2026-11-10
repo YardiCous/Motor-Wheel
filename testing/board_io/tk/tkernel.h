@@ -9,5 +9,6 @@ typedef struct { uint32_t hi; uint32_t lo; } SYSTIM;
 int tk_def_int(uint32_t number, const T_DINT *config);
 void EnableInt(uint32_t number, int level);
 int tk_get_tim(SYSTIM *time);
+int tk_get_otm(SYSTIM *time);
 int tk_set_flg(int32_t flag, uint32_t pattern);
 #endif

@@ -30,6 +30,27 @@ come from `app_program/subsystem1/telemetry.h`. This reads configuration without
 compiling or running C, and never exposes WiFi passwords to the browser.
 Restart the launcher after changing configuration or decoder code.
 
+If stream activity reports `ValueError: reserved sensor value`, update both
+`robot_protocol.py` copies and restart the Python launcher. Firmware reports
+`range_cm=1` for a below-2-cm echo; the dashboard displays this as `<2 cm`.
+Obstacle state `7` means body scan. These values must remain visible rather
+than causing the whole telemetry packet to be rejected. Updating this decoder
+does not require reflashing the robot or correct a false physical echo.
+
+For readings stuck at `<2 cm`, current MQTT firmware also prints USB `RANGE:`
+summaries and `ECHO:` diagnostics for failed or below-range pings. Capture a
+few lines with a stationary target at a known distance. `width` is the
+captured pulse duration; `rise_after` is the time from the software trigger
+timestamp to the rising-edge ISR, so it includes interrupt latency. These
+diagnostics preserve the existing close-stop behaviour.
+
+USB disconnecting and reconnecting, Wi-Fi joining again, and echo counters
+returning to 1 indicate a full chip restart. The GP22 software-reset message
+does not apply to that path. Firmware startup now explicitly initializes the
+microsecond timer's reference; `ECHO` diagnostics show `tick=0x20c` when its
+enable bit and 12-cycle divider are correct. This removes reliance on timer
+setup inherited from USB BOOTSEL flashing.
+
 The robot must be built with `NET=lwip MQTT=1`, and its configured broker must
 be reachable from the computer running Python. The dashboard connects to an
 existing MQTT broker; it does not start one or flash the robot.
@@ -42,7 +63,8 @@ python tools/dashboard/telemetry_dashboard.py --demo
 
 Demo mode needs only Python 3.10+ and the repository files. It creates valid
 28-byte packets and feeds them through the same decoder as real telemetry.
-The dashboard clearly labels simulated readings.
+The dashboard clearly labels simulated readings. Robot Start and Stop controls
+are disabled in demo mode.
 
 ## Connection options
 
@@ -61,11 +83,15 @@ variables, which take precedence over firmware configuration.
 
 The Python MQTT client automatically retries connection failures and
 resubscribes after reconnection. It uses its own client ID so it does not
-disconnect the robot. The dashboard listens only on local loopback and only
-subscribes: it never publishes robot commands.
+disconnect the robot. The dashboard listens only on local loopback. Its Start
+and Stop buttons publish the firmware's one-byte commands to the configured
+`robot/command` topic without retain, using QoS 0 so commands are not queued
+for reconnection. Broker permissions must allow publishing to that topic as
+well as subscribing to telemetry, status and acknowledgements.
 
 ## Readings and controls
 
+- Start and Stop buttons with robot acknowledgement and rejection feedback.
 - Ground and wheel speeds, wrapping distance, ultrasonic clearance and rate.
 - Line sensors, pitch, valid peak height, terrain, barcode, servo and encoders.
 - Vehicle/controller states and all twelve fault bits, with WiFi/MQTT flags
@@ -82,6 +108,57 @@ the local `/api/state` endpoint. The robot link indicator comes from the latest
 telemetry packet; the header describes the dashboard's broker connection.
 
 **Pause view** freezes the displayed readings while collection continues.
+Robot controls and command feedback remain live while the view is paused.
+**Stop** halts the robot's current mission. Press Stop and wait for its accepted
+acknowledgement before using **Start**, which resumes line following. Start
+requires fresh telemetry and a connected broker. Stop remains available with
+stale telemetry and can override a pending Start. The firmware's local E-stop,
+fault latch and reset requirements still apply; Stop is a normal supervisory
+command, and does not clear latched faults.
+
+Start is also blocked while telemetry reports a fatal fault. For example,
+`0x080` means WATCHDOG: a firmware task missed its heartbeat deadline, or
+startup readiness timed out. This is separate from the physical E-stop;
+the motion state "Emergency stop" alone does not identify the fault cause.
+Reset cannot clear an ongoing fault. Current firmware records the first
+watchdog trip and repeats the saved USB console line once per second while
+the fault remains latched, so opening the serial monitor late still shows it:
+
+```text
+WATCHDOG: ms=2500 motion=5 line=5 imu=5 nav=45 scan=60 ready=3
+```
+
+The ages are milliseconds at the trip, in the named task order. Limits are
+20 / 20 / 20 / 40 / 180 ms respectively. `ready=3` means line and IMU startup
+are complete; bit0 is line-ready and bit1 is IMU-ready. Capture happens in
+Safety, and printing happens in the lower-priority telemetry task. The
+watchdog thresholds and reset policy are unchanged. Junctions ignored while
+idle or faulted no longer flood the console, and navigation processes at
+most four perception events per cycle so producers cannot keep it in an
+unbounded queue-draining loop.
+
+Boot, idle and fault states keep sampling the line sensors but do not queue
+barcode or junction events for an inactive mission. A black patch during
+startup no longer overrides the required 32 line calibration samples.
+Queue faults also print a `QUEUE: sources=0x...` line once per second:
+bit0 is command input, bit1 line/barcode, bit2 IMU and bit3 motion output.
+The four-bit source mask preserves which queues overflowed until RESET.
+
+A capture with `nav=60` and the other ages within their limits identifies a
+Navigation heartbeat miss, with the 40-ms deadline unchanged. USB and WiFi
+now run at priorities 9 and 10, below all robot tasks (1..8), so connection
+and console work cannot preempt Navigation at priority 5. The diagnostic
+timestamp and all control deadlines use kernel operating time in milliseconds
+since boot, independent of changes to the wall clock. Physical timing under
+radio and console load still needs verification on the robot.
+
+After an outage or dashboard restart, confirm Stop again before Start. The
+dashboard synchronizes the firmware's four-bit sequence with up to three Stop
+attempts when needed; Start is never automatically retried. Sending is shown
+separately from robot acceptance. If no acknowledgement arrives within two
+seconds, the result is marked unconfirmed. These buttons require the built-in
+robot decoder and are hidden when using `--decoder`.
+
 **Export CSV** downloads the browser's rolling buffer (up to 1,200 samples,
 about five minutes at 4 Hz). This is a live monitor, not a durable recorder;
 restarting Python clears history. A new browser tab initially loads the current
@@ -131,6 +208,9 @@ python -m unittest discover -s testing/dashboard -v
 ```
 
 The suite covers firmware configuration discovery, packet validation, stale
-and retained data, decoder failures, HTTP responses and the demo CLI. With the
-MQTT dependency installed and `mosquitto` on PATH, it also runs a local broker
-integration test for subscription, malformed packets and broker reconnection.
+and retained data, decoder failures, HTTP responses and the demo CLI. Command
+checks cover sequence synchronization, acknowledgement matching, timeouts,
+Start gating, Stop priority and local-origin request validation. With the MQTT
+dependency installed and `mosquitto` on PATH, it also runs a local broker
+integration test for command delivery, acknowledgements, subscription,
+malformed packets and reconnection without command replay.

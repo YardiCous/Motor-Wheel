@@ -39,6 +39,7 @@ static void verify_vector(void);
 static void verify_motion(void);
 static void verify_safety(void);
 static void verify_line(void);
+static void verify_line_startup(void);
 static void verify_bad_barcode(void);
 static void verify_obstacle(void);
 static void verify_range_restart(void);
@@ -83,6 +84,7 @@ int main(void)
     verify_safety();
     terrain_test_run();
     verify_line();
+    verify_line_startup();
     verify_bad_barcode();
     verify_obstacle();
     verify_range_restart();
@@ -329,6 +331,28 @@ static void verify_line(void)
     detector.frame_ms = 995u;
     line_step(&detector, white, 0u, false);
     assert(LINE_SCAN != detector.state);
+}
+
+/** @brief Black tape at boot must not skip the 32 calibration samples. */
+static void verify_line_startup(void)
+{
+    line_t detector = {0};
+    uint16_t black[ROBOT_IR_COUNT] = {4095u, 4095u, 4095u};
+    line_init(&detector);
+
+    for (uint8_t sample = 1u; sample < VERIFY_LINE_CALIBRATION; ++sample)
+    {
+        line_step(&detector, black, 0u, false);
+        assert(LINE_CALIBRATING == detector.state);
+        assert(sample == detector.calibration_samples);
+        assert(0u == detector.junction_ms);
+    }
+
+    line_step(&detector, black, 0u, false);
+    assert(LINE_TRACKING == detector.state);
+    assert(VERIFY_LINE_CALIBRATION == detector.calibration_samples);
+    line_step(&detector, black, 0u, false);
+    assert(LINE_JUNCTION == detector.state);
 }
 
 /** @brief Ambiguous bars and reversing cannot generate a command. */

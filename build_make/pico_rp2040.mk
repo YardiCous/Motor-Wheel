@@ -67,7 +67,7 @@ endif
 
 # Optional MQTT client on top of NET=lwip. Connects and publishes from the
 # same processor-1-owned task as everything else above -- see
-# lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.c. Broker address and topic
+# app_program/subsystem1/mqtt_utk.c. Broker address and topic
 # come from config/wifi_secrets.h (gitignored; copy from
 # config/wifi_secrets.example.h), same as the WiFi credentials.
 MQTT ?= 0
@@ -117,15 +117,23 @@ endif
 ifeq ($(BODY_SCAN),1)
 BODY_SCAN_SUFFIX := _bodyscan
 endif
-# OBSTACLE_TEST=1 ignores the line sensors: it drives straight, bypasses
-# the obstacle, comes back to its original path and drives straight on.
+# OBSTACLE_TEST=1 defaults to driving straight without the line sensors.
+# OBSTACLE_NO_LINE=0 keeps real line tracking and barcode reading enabled.
 # Only the IMU is stubbed; motors, encoders and ranging remain active.
 OBSTACLE_TEST ?= 0
 ifneq ($(filter $(OBSTACLE_TEST),0 1),$(OBSTACLE_TEST))
 $(error Unknown OBSTACLE_TEST '$(OBSTACLE_TEST)'; use 0 or 1)
 endif
+OBSTACLE_NO_LINE ?= $(OBSTACLE_TEST)
+ifneq ($(filter $(OBSTACLE_NO_LINE),0 1),$(OBSTACLE_NO_LINE))
+$(error Unknown OBSTACLE_NO_LINE '$(OBSTACLE_NO_LINE)'; use 0 or 1)
+endif
 ifeq ($(OBSTACLE_TEST),1)
+ifeq ($(OBSTACLE_NO_LINE),1)
 OBSTACLE_TEST_SUFFIX := _obstacle_nolinetest
+else
+OBSTACLE_TEST_SUFFIX := _obstacletest
+endif
 endif
 # BARCODE_TEST=1 prints the raw GP28 barcode sensor data with the motors off;
 # BARCODE_TEST=2 prints the same and decodes it as a Code 39 capital letter.
@@ -250,7 +258,7 @@ ifeq ($(SMP),1)
 CFLAGS  += -DCNF_SMP=1
 ASFLAGS += -DCNF_SMP=1
 endif
-CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST) -DOBSTACLE_TEST=$(OBSTACLE_TEST) -DLINE_TEST=$(LINE_TEST) -DBARCODE_TEST=$(BARCODE_TEST) -DOBSTACLE_NO_LINE=$(OBSTACLE_TEST) -DROBOT_BODY_SCAN=$(BODY_SCAN)u
+CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST) -DOBSTACLE_TEST=$(OBSTACLE_TEST) -DLINE_TEST=$(LINE_TEST) -DBARCODE_TEST=$(BARCODE_TEST) -DOBSTACLE_NO_LINE=$(OBSTACLE_NO_LINE) -DROBOT_BODY_SCAN=$(BODY_SCAN)u
 CFLAGS  += -DTM_CONSOLE_UART=$(CRASH_REPORT)
 ifeq ($(CRASH_REPORT),0)
 CFLAGS  += -DBOARD_UART0_FREE=1
@@ -283,7 +291,7 @@ endif
 # before any recipe executes.
 ################################################################################
 
-PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)-motor$(MOTOR_TEST)-enc$(ENCODER_TEST)-obst$(OBSTACLE_TEST)-line$(LINE_TEST)-bar$(BARCODE_TEST)-body$(BODY_SCAN)
+PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)-motor$(MOTOR_TEST)-enc$(ENCODER_TEST)-obst$(OBSTACLE_TEST)-noline$(OBSTACLE_NO_LINE)-line$(LINE_TEST)-bar$(BARCODE_TEST)-body$(BODY_SCAN)
 PROFILE_FILE := .build_profile
 
 ifneq ($(strip $(shell cat $(PROFILE_FILE) 2>/dev/null)),$(PROFILE_ID))
@@ -517,13 +525,12 @@ mtkernel_3/cyw43/cyw43_lwip.o: $(CYW43_DRIVER_PATH)/src/cyw43_lwip.c
 ifeq ($(MQTT),1)
 
 MQTT_CORE_OBJS := ./mtkernel_3/lwip/apps/mqtt/mqtt.o
-MQTT_PORT_OBJS := ./mtkernel_3/lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.o
-$(MQTT_PORT_OBJS): CFLAGS += -std=c99 -Wall -Wextra -Werror -Wshadow -Wmissing-prototypes
+# The application subdir.mk includes subsystem1/mqtt_utk.c when MQTT=1.
 
 CFLAGS += -DTM_MQTT=1
 
-OBJS += $(MQTT_CORE_OBJS) $(MQTT_PORT_OBJS)
-C_DEPS += $(MQTT_CORE_OBJS:.o=.d) $(MQTT_PORT_OBJS:.o=.d)
+OBJS += $(MQTT_CORE_OBJS)
+C_DEPS += $(MQTT_CORE_OBJS:.o=.d)
 
 mtkernel_3/lwip/apps/mqtt/mqtt.o: $(LWIPDIR)/apps/mqtt/mqtt.c
 	@echo 'Building lwIP file: $<'

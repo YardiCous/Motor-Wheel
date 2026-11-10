@@ -5,10 +5,10 @@
 
 IMPORT void cyw43_utk_task(INT stacd, void *exinf);
 
-/* USB CDC drains at priority 3 on the same physical core.  Keep radio polling
- * below it so firmware download and the 2 ms poll cadence cannot overflow the
- * console ring, while remaining well above the qualification task. */
-#define CYW43_TASK_PRIORITY  4
+/* Robot tasks run at priorities 1..8 and USB drains at 9 on this core.
+ * Radio firmware download, join and polling must not starve Navigation (5)
+ * or Obstacle (6). Lower numeric priorities preempt higher numeric ones. */
+#define CYW43_TASK_PRIORITY  10
 #if TM_NET_LWIP
 /* lwIP's own call chains (tcp_input/dhcp/etharp) run on this same task and
  * go deeper than the bare radio poll loop did. */

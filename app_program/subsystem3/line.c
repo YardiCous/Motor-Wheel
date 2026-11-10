@@ -105,6 +105,8 @@ void line_step(line_t * p_line, const uint16_t * p_samples, uint16_t distance,
         p_line->state = (p_line->calibration_samples >= LINE_CALIBRATION_COUNT)
                             ? LINE_TRACKING
                             : LINE_CALIBRATING;
+        /* Junction detection must not bypass the startup sample count. */
+        return;
     }
     else
     {

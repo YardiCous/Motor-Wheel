@@ -11,6 +11,7 @@
 #define IO 0x40014000u
 #define TIMER 0x40054000u
 static uint32_t now_us;
+static uint32_t wall_offset_ms;
 static uint32_t gpio_inputs;
 static uint32_t pending_edges;
 static uint32_t enabled_edges;
@@ -42,6 +43,7 @@ uint32_t board_io_mock_read(uint32_t address)
     if (address == IO + 0x100u) return enabled_edges;
     if (address == IO + 0xf0u) return pending_edges;
     if (address == 0x4000c008u) return 0x4011u;
+    if (address == 0x4005802cu) return 0x1fe60cu;
     return 0u;
 }
 
@@ -80,6 +82,12 @@ void EnableInt(uint32_t number, int level)
 
 int tk_get_tim(SYSTIM *time)
 {
+    time->lo = now_us / 1000u + wall_offset_ms;
+    return E_OK;
+}
+
+int tk_get_otm(SYSTIM *time)
+{
     time->lo = now_us / 1000u;
     return E_OK;
 }
@@ -116,8 +124,10 @@ static void measure(uint32_t width_us, uint16_t expected_cm)
     board_io_range_diagnostics(&diagnostic);
     assert(diagnostic.state == 3u);
     assert(diagnostic.width_us == width_us);
+    assert(diagnostic.rise_after_us == trigger_width + 101u);
     assert(diagnostic.rises > 0u && diagnostic.falls > 0u);
     assert(diagnostic.irq_enabled == 0xc0u);
+    assert(diagnostic.tick_config == 0x20cu);
     assert(board_io_range(&cm));
     assert(cm == expected_cm);
     assert(!board_io_range(&cm)); /* Completed pulses are consumed once. */
@@ -125,6 +135,13 @@ static void measure(uint32_t width_us, uint16_t expected_cm)
 
 int main(void)
 {
+    now_us = 2000000u;
+    wall_offset_ms = 3355770000u;
+    assert(board_io_time_ms() == 2000u);
+    wall_offset_ms = 7u;
+    now_us += 10000u;
+    assert(board_io_time_ms() == 2010u);
+    now_us = 0u;
     assert(board_io_init(7));
     measure(1160u, 20u);
     measure(1740u, 30u);
@@ -140,6 +157,7 @@ int main(void)
     board_io_range_diagnostics(&diagnostic);
     assert(diagnostic.state == 1u);
     assert(diagnostic.width_us == 0u);
+    assert(diagnostic.rise_after_us == 0u);
     assert(!board_io_range(&cm));
     assert(cm == 0u);
     /* Reset during an incomplete echo must allow the next ping to work. */
@@ -151,6 +169,8 @@ int main(void)
     pending_edges = 0xc0u;
     board_io_range_reset();
     assert(pending_edges == 0u);
+    board_io_range_diagnostics(&diagnostic);
+    assert(diagnostic.rise_after_us == 0u);
     assert(!board_io_range(&cm));
     measure(1450u, 25u);
     /* Reset must not remove encoder interrupts or change encoder counts. */

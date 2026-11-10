@@ -39,9 +39,14 @@ make -C build_make -j8 ENCODER_TEST=1 WIFI=none NET=none
 make -C build_make -j8 OBSTACLE_TEST=1 WIFI=none NET=none
 ```
 
-For example, the MQTT build produces
-`build_make/mtk3pico_smp1_usb_cdc_wifi_lwip_mqtt.uf2`.
-Hold BOOTSEL while connecting USB and copy that UF2 onto RPI-RP2.
+The two standard builds produce:
+
+- Default: `build_make/mtk3pico_smp1_usb_cdc_wifi.uf2`
+- MQTT dashboard: `build_make/mtk3pico_smp1_usb_cdc_wifi_lwip_mqtt.uf2`
+
+Both include the startup and task-priority fixes. Every build checks that
+robot tasks outrank USB and WiFi services. Hold BOOTSEL while connecting USB
+and copy the selected UF2 onto RPI-RP2.
 
 GP0/GP1 belong to ultrasonic ranging: use USB console and `CRASH_REPORT=0`.
 The hardware driver rejects UART-console builds that would claim those pins.
@@ -127,6 +132,14 @@ Keep the ultrasonic head aligned forward for body scanning.
 RESET reinitialises the ranging pins and echo capture. The trigger pulse is
 timed directly for 12 microseconds, so it does not depend on a timer ISR.
 
+The startup clock code explicitly configures the watchdog tick divider for
+a 1-MHz timer reference on every boot. USB BOOTSEL sets that divider while
+flashing, but normal flash boot does not. Inheriting its reset value made
+timer-based trigger pulses, echo widths and network delays depend on how the
+firmware was started. The firmware now owns that setup after selecting the
+12-MHz crystal reference. This starts the tick generator, not a watchdog reset
+countdown. `ECHO` diagnostics report `tick=0x20c` for the expected setup.
+
 ## Wiring and operating assumptions
 
 See [TEAM.md](TEAM.md) for every pin and peripheral owner. The implementation
@@ -171,7 +184,9 @@ rules. See [coding_standard.md](docs/coding_standard.md) for the review scope.
 
 Install the MQTT dependency once, then run the Python launcher. It opens a
 local browser dashboard, automatically subscribes to the firmware topics,
-and decodes live telemetry using the existing protocol decoder.
+and decodes live telemetry using the existing protocol decoder. Start and Stop
+buttons send supervisory commands and show the robot's acknowledgement. Press
+Stop and wait for confirmation before Start becomes available.
 
 ```sh
 python3 -m venv .venv

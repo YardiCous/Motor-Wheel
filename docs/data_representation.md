@@ -32,12 +32,12 @@ have the entire unsigned 32-bit modulo range as their valid domain.
 | terrain | 85 | 3 | 0..6 |
 | pitch_offset | 88 | 7 | 0..127 = -32..31.5 degrees |
 | peak_mm | 95 | 8 | 0..255 mm; overflow sets RANGE and clears validity |
-| range_cm | 103 | 9 | 2..400 cm; 0 means invalid; 1 and 401..511 rejected |
+| range_cm | 103 | 9 | 0 unavailable; 1 below 2 cm; 2..400 cm (400 also no echo) |
 | servo_3deg | 112 | 6 | 0..60 = 0..180 degrees; selected profile angle in PLAN, otherwise commanded servo angle |
 | barcode_event | 118 | 3 | code2 + known1; last valid barcode, not a queue pulse |
 | line_error_offset | 121 | 8 | 0..254 = -127..127; 255 unused |
 | line_state | 129 | 3 | 0..5 |
-| obstacle_state | 132 | 3 | 0..6 |
+| obstacle_state | 132 | 3 | 0..7 (7 body scan) |
 | link | 135 | 2 | WiFi1 | MQTT1 |
 | on_hump | 137 | 1 | 0/1, whole-hump status |
 | height_valid | 138 | 1 | 0/1; never infer validity from a zero height |
@@ -69,9 +69,12 @@ and the units for biased fields are described below and in the headers.
 | board_io / capture_t | `left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / capture_t | `right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / capture_t | `rise_us` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / capture_t | `trigger_us` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / capture_t | `echo_rises` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / capture_t | `echo_falls` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / board_io_range_diag_t | `width_us` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / board_io_range_diag_t | `rise_after_us` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| board_io / board_io_range_diag_t | `tick_config` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / board_io_range_diag_t | `rises` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / board_io_range_diag_t | `falls` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | board_io / board_io_range_diag_t | `gpio_control` | 0..4294967295 | 32 | 32-bit modulo counter/time |
@@ -90,7 +93,7 @@ and the units for biased fields are described below and in the headers.
 | robot_os / shared_t | `b_line_ready` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `sequence` | 0..15 | 4 | unsigned bit-field |
 | robot_os / shared_t | `b_sequence_valid` | 0..1 | 1 | bool bit-field |
-| robot_os / shared_t | `b_queue_fault` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `queue_faults` | 0..15 | 4 | unsigned bit-field |
 | robot_os / shared_t | `b_range_fault` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_remote_armed` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_network_online` | 0..1 | 1 | bool bit-field |
@@ -101,6 +104,10 @@ and the units for biased fields are described below and in the headers.
 | robot_os / buttons_t | `stable_count` | 0..3 | 2 | unsigned bit-field |
 | robot_os / buttons_t | `candidate` | 0..7 | 3 | unsigned bit-field |
 | robot_os / buttons_t | `previous` | 0..7 | 3 | unsigned bit-field |
+| robot_os / watchdog_t | `ready` | 0..3 | 2 | unsigned bit-field |
+| robot_os / watchdog_t | `b_captured` | 0..1 | 1 | bool bit-field |
+| robot_os / watchdog_t | `b_pending` | 0..1 | 1 | bool bit-field |
+| robot_os / watchdog_t | `at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / bench_t | `report_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / bench_t | `start_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / bench_t | `start_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |

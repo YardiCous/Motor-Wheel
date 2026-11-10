@@ -60,8 +60,8 @@ All seven application tasks and the existing WiFi task are pinned to processor
 | Obstacle | 6 | 60-ms pings; median every 180 ms; bounded settle | 2048 |
 | Telemetry producer | 8 | 250 ms | 2048 |
 
-USB stays at kernel priority 3 and WiFi at 4. The priority change from the
-proposal places terrain ahead of WiFi, while navigation remains below it.
+USB runs at priority 9 and WiFi at 10 so every robot task can preempt them.
+Navigation and obstacle work must not wait behind console or radio bursts.
 The RTOS reserves **14,336 bytes** for these seven task stacks, separately from
 static `.bss` and queue storage. Stack high-water measurement remains open.
 

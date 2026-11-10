@@ -26,6 +26,7 @@ mtkernel_3/app_program/%.o: ../app_program/%.c
 .PHONY: app_style_check
 app_style_check:
 	@python3 ../tools/check_barr.py
+	@python3 ../tools/check_task_priorities.py
 	@python3 ../tools/generate_docs.py
 
 $(subst ../, ./mtkernel_3/, $(TEMP_OBJS)): | app_style_check

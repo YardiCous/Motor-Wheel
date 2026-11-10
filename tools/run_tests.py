@@ -44,6 +44,18 @@ def build_board_io(root, executable):
     subprocess.run(command, check=True)
 
 
+def build_clock(root, executable):
+    command = [os.environ.get("CC", "gcc"), "-std=c99", "-g", "-O1",
+               "-Wall", "-Wextra", "-Werror", "-D_PICO_RP2040_",
+               "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+               "-I" + str(root / "testing/clock"),
+               "-I" + str(root / "include"), "-I" + str(root / "config"),
+               str(root / "testing/clock/verify_clock.c"),
+               str(root / "kernel/sysdepend/pico_rp2040/cpu_clock.c"),
+               "-o", str(executable)]
+    subprocess.run(command, check=True)
+
+
 def run(executable):
     environment = dict(os.environ)
     # These tests allocate no heap memory. The managed runner uses ptrace,
@@ -53,11 +65,28 @@ def run(executable):
     return subprocess.check_output([str(executable)], text=True, env=environment)
 
 
+def build_robot_os(root, executable):
+    # ASan's global registration would retain the unused RTOS task-entry
+    # table and prevent linking just the real functions under test.
+    command = [os.environ.get("CC", "gcc"), *FLAGS, "-g", "-O1",
+               "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+               "--param=asan-globals=0",
+               "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections",
+               "-I" + str(root / "testing/robot_os"),
+               str(root / "testing/robot_os/verify_startup.c"),
+               str(root / "app_program/data_formats.c"),
+               str(root / "app_program/subsystem3/scanner.c"),
+               str(root / "app_program/subsystem3/code39.c"),
+               "-o", str(executable)]
+    subprocess.run(command, check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     subprocess.run([sys.executable, str(ROOT / "tools/check_barr.py")], check=True)
+    subprocess.run([sys.executable, str(ROOT / "tools/check_task_priorities.py")], check=True)
     with tempfile.TemporaryDirectory(prefix="motor-test-") as temporary:
         executable = Path(temporary) / "verify"
         build(ROOT, executable)
@@ -65,6 +94,12 @@ def main():
         board_executable = Path(temporary) / "verify_board_io"
         build_board_io(ROOT, board_executable)
         output += run(board_executable)
+        clock_executable = Path(temporary) / "verify_clock"
+        build_clock(ROOT, clock_executable)
+        output += run(clock_executable)
+        os_executable = Path(temporary) / "verify_robot_os"
+        build_robot_os(ROOT, os_executable)
+        output += run(os_executable)
         bench_executable = Path(temporary) / "verify_bench"
         build(ROOT, bench_executable, bench=True)
         output += run(bench_executable)

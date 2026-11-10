@@ -93,8 +93,10 @@ The direct GPIO/PWM/ADC/I2C/timer driver follows the
 
 The complete periods, numeric priorities, core affinity, stacks and triggers are
 in [TEAM.md](../TEAM.md). Seven application tasks use one 5-ms cyclic release.
-Safety is priority 1; Motion and Line are 2; Terrain is 3, ahead of WiFi at 4;
-Navigation is 5; Obstacle 6; Telemetry producer 8. USB remains priority 3.
+Safety is priority 1; Motion and Line are 2; Terrain is 3; Navigation is 5;
+Obstacle is 6; Telemetry producer is 8. USB is 9 and WiFi is 10, below every
+robot task. Service bursts must not delay Navigation's heartbeat or command
+handling. `tools/check_task_priorities.py` checks this ordering.
 Ranging blocks on an event flag; echo timing uses GPIO interrupts. The trigger
 pulse uses a short critical section (2-us low, 12-us high), independent of
 timer-alarm interrupts. RESET restores ranging GPIO and capture state.

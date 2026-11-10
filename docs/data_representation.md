@@ -167,6 +167,9 @@ and the units for biased fields are described below and in the headers.
 | line / line_t | `threshold_left` | 0..4095 | 12 | unsigned bit-field |
 | line / line_t | `threshold_centre` | 0..4095 | 12 | unsigned bit-field |
 | line / line_t | `threshold_right` | 0..4095 | 12 | unsigned bit-field |
+| scanner / scanner_t | `last_left` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| scanner / scanner_t | `last_right` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| scanner / scanner_t | `element_edges` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | drv_lsm303 / drv_lsm303_t | `variant` | 0..3 | 2 | unsigned bit-field |
 | drv_lsm303 / drv_lsm303_t | `accel_address` | 0..127 | 7 | unsigned bit-field |
 | drv_lsm303 / drv_lsm303_t | `mag_address` | 0..127 | 7 | unsigned bit-field |

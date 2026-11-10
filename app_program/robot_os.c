@@ -18,10 +18,10 @@
 #if ENCODER_TEST
 #include "subsystem2/encoder_test.h"
 #endif /* ENCODER_TEST */
+#include "subsystem3/scanner.h"
 #include "subsystem3/line.h"
 #if BARCODE_TEST
 #include "subsystem3/barcode_test.h"
-#include <tm/tmonitor.h>
 #endif /* BARCODE_TEST */
 #include "subsystem4/drv_lsm303.h"
 #include "subsystem4/safety.h"
@@ -30,9 +30,7 @@
 #include "subsystem5/obstacle.h"
 
 #include <tk/tkernel.h>
-#if (OBSTACLE_TEST || LINE_TEST)
 #include <tm/tmonitor.h>
-#endif /* OBSTACLE_TEST || LINE_TEST */
 
 #define ROBOT_TASK_COUNT 7u
 #define ROBOT_MOTION_DEPTH 4u
@@ -156,7 +154,11 @@ static void motion_cycle(motion_t * p_motion);
 static bool wheel_speeds(int32_t edges_left, int32_t edges_right);
 #endif /* MOTOR_TEST && ENCODER_TEST */
 #if ((!BARCODE_TEST) && (!OBSTACLE_NO_LINE))
-static void line_cycle(line_t * p_line);
+static void line_cycle(line_t * p_line, scanner_t * p_reader,
+                       bool * pb_junction);
+static void line_events(line_t * p_line, scanner_t * p_reader, uint16_t raw,
+                        bool b_departure, bool * pb_junction);
+static void line_event(uint8_t event);
 #endif /* BARCODE_TEST */
 #if OBSTACLE_NO_LINE
 static void line_virtual(void);
@@ -572,13 +574,16 @@ static void line_task(INT start, void * p_argument)
         line_virtual();
     }
 #else
-    line_t detector = {0};
+    line_t    detector   = {0};
+    scanner_t reader     = {0};
+    bool      b_junction = false;
     line_init(&detector);
+    scanner_init(&reader);
 
     for (;;)
     {
         wait_release();
-        line_cycle(&detector);
+        line_cycle(&detector, &reader, &b_junction);
     }
 #endif /* BARCODE_TEST */
 }
@@ -951,7 +956,8 @@ static void line_virtual(void)
 #endif /* OBSTACLE_NO_LINE */
 #if ((!BARCODE_TEST) && (!OBSTACLE_NO_LINE))
 /** @brief Line errors and full-resolution sensor samples have one writer. */
-static void line_cycle(line_t * p_line)
+static void line_cycle(line_t * p_line, scanner_t * p_reader,
+                       bool * pb_junction)
 {
     uint16_t samples[ROBOT_IR_COUNT] = {0u};
     bool     b_valid                 = board_io_line(samples);
@@ -962,13 +968,12 @@ static void line_cycle(line_t * p_line)
     uint32_t snapshot                = field_read(5u, 32u);
     /* Distance occupies the snapshot's low twelve bits. */
     line_step(p_line, samples, (uint16_t)(snapshot & 4095u), b_departure);
+    /* GP28 is the third sample. */
+    line_events(p_line, p_reader, samples[2], b_departure, pb_junction);
     field_write(121u, 8u, p_line->error);
-    field_write(129u, 3u, p_line->state);
-    if (p_line->b_barcode_valid)
-    {
-        field_write(118u, 3u,
-                    p_line->barcode | (p_line->b_barcode_valid ? 4u : 0u));
-    }
+    /* A barcode under GP28 reports SCAN, which slows line following. */
+    bool b_scan = (p_reader->b_scanning) && (LINE_TRACKING == p_line->state);
+    field_write(129u, 3u, b_scan ? LINE_SCAN : p_line->state);
 
     for (uint8_t sensor = 0u; sensor < ROBOT_IR_COUNT; ++sensor)
     {
@@ -978,22 +983,51 @@ static void line_cycle(line_t * p_line)
     uint32_t mask         = board_io_lock();
     g_shared.b_line_ready = b_valid && (LINE_CALIBRATING != p_line->state);
     board_io_unlock(mask);
-
-    if (p_line->b_barcode_valid)
-    {
-        uint8_t event  = p_line->barcode;
-        ER      result = tk_snd_mbf(gh_barcode_queue, &event, 1, TMO_POL);
-        mask           = board_io_lock();
-        g_shared.b_queue_fault =
-            (g_shared.b_queue_fault) || ((E_OK != result));
-        board_io_unlock(mask);
-    }
-
     mask                    = board_io_lock();
     g_shared.b_line_visible = b_valid && (p_line->b_line_valid);
     g_shared.b_line_lost    = p_line->b_lost;
     board_io_unlock(mask);
     heartbeat(1u);
+}
+
+/** @brief GP28 letters and junction arrivals go to Navigation in order: a
+ * barcode still being read when the junction arrives is decoded first.
+ */
+static void line_events(line_t * p_line, scanner_t * p_reader, uint16_t raw,
+                        bool b_departure, bool * pb_junction)
+{
+    uint32_t left  = 0u;
+    uint32_t right = 0u;
+    (void)board_io_encoders(&left, &right);
+    bool b_on   = (LINE_CALIBRATING != p_line->state) && (!b_departure);
+    char letter = scanner_step(
+        p_reader, raw, (uint16_t)p_line->threshold_right, left, right, b_on);
+    bool b_arrived = (LINE_JUNCTION == p_line->state) && (!*pb_junction);
+    *pb_junction   = (LINE_JUNCTION == p_line->state);
+
+    if (b_arrived && ('\0' == letter))
+    {
+        letter = scanner_flush(p_reader);
+    }
+
+    if ('\0' != letter)
+    {
+        line_event((uint8_t)letter);
+    }
+
+    if (b_arrived)
+    {
+        line_event((uint8_t)JUNCTION_EVENT);
+    }
+}
+
+/** @brief A full queue is a fault, as for every other event queue. */
+static void line_event(uint8_t event)
+{
+    ER       result        = tk_snd_mbf(gh_barcode_queue, &event, 1, TMO_POL);
+    uint32_t mask          = board_io_lock();
+    g_shared.b_queue_fault = (g_shared.b_queue_fault) || ((E_OK != result));
+    board_io_unlock(mask);
 }
 #endif /* BARCODE_TEST */
 
@@ -1077,12 +1111,30 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
 /** @brief Latest line data is combined with consumptive motion events. */
 static void navigation_cycle(navigation_t * p_navigation)
 {
-    uint8_t barcode  = 0u;
-    INT     received = tk_rcv_mbf(gh_barcode_queue, &barcode, TMO_POL);
+    uint8_t event = 0u;
 
-    if (1 == received)
+    /* Letters and junctions, oldest first. */
+    while (1 == tk_rcv_mbf(gh_barcode_queue, &event, TMO_POL))
     {
-        navigation_barcode(p_navigation, barcode);
+        char pending = p_navigation->junction.pending;
+
+        if (JUNCTION_EVENT == event)
+        {
+            uint8_t action = navigation_junction(p_navigation);
+            tm_printf((UB *)"JUNCTION: barcode '%c' -> %s\n", pending,
+                      (UB *)junction_name(action));
+        }
+        else if (navigation_letter(p_navigation, (char)event))
+        {
+            tm_printf((UB *)"BARCODE: read %c, used at the next junction "
+                            "(%s)\n",
+                      (int)event,
+                      (UB *)junction_name(junction_action((char)event)));
+        }
+        else
+        {
+            /* Only A..Z are junction instructions. */
+        }
     }
 
     uint8_t imu_event[2] = {0u};

@@ -73,6 +73,25 @@ int main(void)
     check_letter(widths, count, 'Z', false);
     code39_decode(widths, 8u, &result);
     assert(CODE39_BAD_COUNT == result.status);
+    /* Junk before the barcode (stopped robot, hand) is skipped. */
+    uint16_t junk[CODE39_MAX_ELEMENTS] = {5u, 7u, 3u, 9u, 2u, 40u};
+    count                              = build("*Z*", &junk[6]);
+    code39_decode(junk, (uint8_t)(count + 6u), &result);
+    assert(CODE39_OK == result.status);
+    assert('Z' == result.letter);
+    assert(6u == result.skipped);
+
+    /* The 10 Nov robot scan: bars read narrower than gaps, and the last
+     * '*' was smeared into a '7'. "*Z" is still enough for Z. */
+    static const uint16_t scan[31] = {
+        41u,  254u, 35u, 110u, 191u, 101u, 181u, 105u, 41u, 107u, 33u,
+        108u, 202u, 77u, 327u, 13u,  38u,  40u,  108u, 49u, 97u,  53u,
+        94u,  208u, 71u, 85u,  198u, 102u, 195u, 77u,  186u};
+    code39_decode(scan, 31u, &result);
+    assert(CODE39_OK == result.status);
+    assert(0 == strcmp(result.text, "*Z"));
+    assert('Z' == result.letter);
+    assert(result.b_partial);
 
     (void)memset(widths, 0, sizeof(widths));
     for (uint8_t index = 0u; index < 29u; ++index)
@@ -92,7 +111,8 @@ int main(void)
     check_letter(widths, count, 'Q', false);
 
     (void)puts("PASS: Code 39 A-Z forwards, backwards, speed drift, "
-               "partial scans, *Z / Z*, unclear widths, non-letter, "
+               "partial scans, *Z / Z*, real 10 Nov scan, unclear widths, "
+               "non-letter, "
                "unframed");
     return 0;
 }

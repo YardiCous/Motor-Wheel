@@ -12,11 +12,19 @@
 #define LINE_FRAME_TIMEOUT_MS 1000u
 #define LINE_CALIBRATION_COUNT 32u
 #define LINE_BARCODE_SEGMENTS 6u
+/* 1: the old provisional 2-bit framed barcode (docs/barcode_protocol.md),
+ * kept for the host tests. 0: off; scanner.c reads Code 39 instead,
+ * and a wide Code 39 bar can no longer start a framed scan that would hide
+ * a junction. */
+#ifndef ROBOT_LINE_FRAMED_BARCODE
+#define ROBOT_LINE_FRAMED_BARCODE 0u
+#endif /* ROBOT_LINE_FRAMED_BARCODE */
 
 _Static_assert(ROBOT_LINE_STEER_MM_SECOND <= 127u,
                "steering must fit the offset-binary 8-bit error field");
 
 static void barcode_step(line_t * p_line, bool b_black, uint16_t distance);
+static void barcode_frame(line_t * p_line, bool b_black, uint16_t distance);
 static void barcode_transition(line_t * p_line, uint16_t width);
 static bool narrow_bar(uint16_t width);
 
@@ -94,14 +102,13 @@ void line_step(line_t * p_line, const uint16_t * p_samples, uint16_t distance,
         ++p_line->calibration_samples;
         p_line->b_last_black  = b_right;
         p_line->transition_mm = distance;
-
-        if (p_line->calibration_samples >= LINE_CALIBRATION_COUNT)
-        {
-            p_line->state = LINE_TRACKING;
-        }
+        p_line->state = (p_line->calibration_samples >= LINE_CALIBRATION_COUNT)
+                            ? LINE_TRACKING
+                            : LINE_CALIBRATING;
     }
     else
     {
+        /* With the framed format off, GP28 belongs to scanner.c. */
         barcode_step(p_line, b_right, distance);
     }
 
@@ -164,8 +171,17 @@ int16_t line_error(const line_t * p_line)
     return (int16_t)((int32_t)p_line->error - 127);
 }
 
-/** @brief Consume right-sensor edges only after a valid 24..36-mm guard. */
+/** @brief The old framed format runs only with ROBOT_LINE_FRAMED_BARCODE. */
 static void barcode_step(line_t * p_line, bool b_black, uint16_t distance)
+{
+    if (0u != ROBOT_LINE_FRAMED_BARCODE)
+    {
+        barcode_frame(p_line, b_black, distance);
+    }
+}
+
+/** @brief Consume right-sensor edges only after a valid 24..36-mm guard. */
+static void barcode_frame(line_t * p_line, bool b_black, uint16_t distance)
 {
     bool    b_changed = (b_black != p_line->b_last_black);
     int16_t signed_width =

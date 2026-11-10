@@ -38,6 +38,8 @@ _Static_assert(ROBOT_BYPASS_STEP_MS <= 8000u,
 #define NAVIGATION_QUARTER_ARC_MM ROBOT_QUARTER_TURN_MM
 #define NAVIGATION_LOOK_SETTLE_MS 400u
 #define NAVIGATION_MAX_LEG_MM ((ROBOT_TURN_MM_SECOND * 8000u) / 1000u)
+/* Junction turns: stage 1 drives the axle onto the junction, then turns. */
+#define NAVIGATION_JUNCTION_TURN 1u
 
 /* Body scanning is also selected automatically when servo edges are unseen. */
 #ifndef ROBOT_BODY_SCAN
@@ -77,6 +79,7 @@ void navigation_init(navigation_t * p_navigation)
 {
     memset(p_navigation, 0, sizeof(*p_navigation));
     p_navigation->state = DATA_FORMATS_IDLE;
+    junction_init(&p_navigation->junction);
 }
 
 /** @brief STOP is valid in every state and flushes motion at the OS boundary.
@@ -137,6 +140,7 @@ void navigation_barcode(navigation_t * p_navigation, uint8_t barcode)
     if ((DATA_FORMATS_FOLLOW == p_navigation->state) && (barcode <= 3u))
     {
         p_navigation->state      = DATA_FORMATS_BARCODE;
+        p_navigation->stage      = 0u;
         p_navigation->barcode    = barcode;
         p_navigation->elapsed_ms = 0u;
         uint16_t distance        = NAVIGATION_QUARTER_ARC_MM;
@@ -150,6 +154,51 @@ void navigation_barcode(navigation_t * p_navigation, uint8_t barcode)
         issue(p_navigation, mode, distance, ROBOT_TURN_MM_SECOND, b_left);
         p_navigation->b_waiting = true;
     }
+}
+
+/** @brief Letters are remembered in any state, until a junction uses them.
+ */
+bool navigation_letter(navigation_t * p_navigation, char letter)
+{
+    return junction_store(&p_navigation->junction, letter);
+}
+
+/** @brief The IR sensors are ROBOT_SENSOR_AHEAD_MM in front of the axle, so
+ * a left or right turn first drives that far to turn on the junction itself.
+ * A U-turn is twice the 90-degree arc, turned on the spot.
+ */
+uint8_t navigation_junction(navigation_t * p_navigation)
+{
+    uint8_t action = JUNCTION_IGNORED;
+
+    if (DATA_FORMATS_FOLLOW == p_navigation->state)
+    {
+        action = junction_take(&p_navigation->junction);
+    }
+
+    if ((JUNCTION_LEFT == action) || (JUNCTION_RIGHT == action))
+    {
+        p_navigation->state      = DATA_FORMATS_BARCODE;
+        p_navigation->stage      = NAVIGATION_JUNCTION_TURN;
+        p_navigation->b_left     = (JUNCTION_LEFT == action);
+        p_navigation->elapsed_ms = 0u;
+        issue(p_navigation, MOTION_MOVE, ROBOT_SENSOR_AHEAD_MM,
+              ROBOT_TURN_MM_SECOND, false);
+    }
+    else if (JUNCTION_UTURN == action)
+    {
+        p_navigation->state      = DATA_FORMATS_BARCODE;
+        p_navigation->stage      = 0u;
+        p_navigation->elapsed_ms = 0u;
+        issue(p_navigation, MOTION_TURN, NAVIGATION_QUARTER_ARC_MM * 2u,
+              ROBOT_TURN_MM_SECOND, true);
+    }
+    else
+    {
+        /* FORWARD: line following already carries straight over. */
+    }
+
+    return action;
 }
 
 /** @brief Safety always wins over barcode completion or a pending bypass. */
@@ -185,7 +234,15 @@ void navigation_step(navigation_t * p_navigation, uint8_t motion_mode,
             break;
 
         case DATA_FORMATS_BARCODE:
-            if (b_done && (MOTION_IDLE == motion_mode))
+            if (b_done && (MOTION_IDLE == motion_mode) &&
+                (NAVIGATION_JUNCTION_TURN == p_navigation->stage))
+            {
+                /* On the junction: turn left (reverse) or right. */
+                p_navigation->stage = 0u;
+                issue(p_navigation, MOTION_TURN, NAVIGATION_QUARTER_ARC_MM,
+                      ROBOT_TURN_MM_SECOND, p_navigation->b_left);
+            }
+            else if (b_done && (MOTION_IDLE == motion_mode))
             {
                 p_navigation->state = DATA_FORMATS_FOLLOW;
                 issue(p_navigation, MOTION_FOLLOW, 0u,

@@ -3,18 +3,23 @@
  */
 #ifndef ROBOT_CONFIG_H
 #define ROBOT_CONFIG_H
-#if (OBSTACLE_TEST || LINE_TEST)
-/* Bench tests: slow enough to watch, and the search gets time to finish. */
-#define ROBOT_CRUISE_MM_SECOND 70u
-#define ROBOT_CAUTIOUS_MM_SECOND 80u
-#define ROBOT_TURN_MM_SECOND 70u
-#define ROBOT_SEARCH_MS 5000u
-#else
-#define ROBOT_CRUISE_MM_SECOND 500u
-#define ROBOT_CAUTIOUS_MM_SECOND 250u
-#define ROBOT_TURN_MM_SECOND 150u
-#define ROBOT_SEARCH_MS 3000u
-#endif /* OBSTACLE_TEST || LINE_TEST */
+/* Every build drives at 50 mm/s: line following, slow zones and turns.
+ * Host tests override these with the values their expectations were
+ * written for (500, 250, 150). */
+#ifndef ROBOT_CRUISE_MM_SECOND
+#define ROBOT_CRUISE_MM_SECOND 50u
+#endif /* ROBOT_CRUISE_MM_SECOND */
+#ifndef ROBOT_CAUTIOUS_MM_SECOND
+#define ROBOT_CAUTIOUS_MM_SECOND 50u
+#endif /* ROBOT_CAUTIOUS_MM_SECOND */
+#ifndef ROBOT_TURN_MM_SECOND
+#define ROBOT_TURN_MM_SECOND 50u
+#endif /* ROBOT_TURN_MM_SECOND */
+/* The lost-line search turns 90 degrees left then 180 right: about 5.5 s at
+ * 50 mm/s, so it gets 7 s. Slow driving also needs more bypass steps. */
+#ifndef ROBOT_SEARCH_MS
+#define ROBOT_SEARCH_MS 7000u
+#endif /* ROBOT_SEARCH_MS */
 #define ROBOT_WHEEL_CIRCUM_UM 204200u
 /* Measured: one wheel turn is 2400 encoder edges. Host tests override this
  * and the track with the reference values their expectations were written
@@ -31,7 +36,7 @@
 /* Per-sensor black thresholds; each sensor reads white differently. */
 #define ROBOT_IR_THRESHOLD_LEFT 450u
 #define ROBOT_IR_THRESHOLD_CENTRE 300u
-#define ROBOT_IR_THRESHOLD_RIGHT 2100u
+#define ROBOT_IR_THRESHOLD_RIGHT 400u
 /* Estimated from the turn tests (a 280 setting gave 90 degrees with the old
  * 960 scale, so 280 / 2.5 = 112). Replace with the measured wheel spacing. */
 #ifndef ROBOT_TRACK_MM
@@ -96,11 +101,9 @@
 #define ROBOT_NO_LINE 0u
 #define ROBOT_BYPASS_BACK_EXTRA_MM 150u
 #endif /* OBSTACLE_NO_LINE */
-#if (OBSTACLE_TEST || LINE_TEST)
+#ifndef ROBOT_BYPASS_MAX_STEPS
 #define ROBOT_BYPASS_MAX_STEPS 15u
-#else
-#define ROBOT_BYPASS_MAX_STEPS 12u
-#endif /* OBSTACLE_TEST || LINE_TEST */
+#endif /* ROBOT_BYPASS_MAX_STEPS */
 #define ROBOT_RANGE_MAX_CM 400u
 #define ROBOT_IR_THRESHOLD 450u
 /* Line following mode. 1: the tape runs between the left (GP26) and centre
@@ -112,7 +115,7 @@
 #define ROBOT_LINE_STRADDLE 1u
 #endif /* ROBOT_LINE_STRADDLE */
 /* Steering in mode 1: one wheel speeds up and the other slows by this much. */
-#define ROBOT_LINE_STEER_MM_SECOND 70u
+#define ROBOT_LINE_STEER_MM_SECOND 50u
 #define ROBOT_IMPACT_MG 2500
 #define ROBOT_IMU_CAL_SAMPLES 32u
 #define ROBOT_START_PIN 20u

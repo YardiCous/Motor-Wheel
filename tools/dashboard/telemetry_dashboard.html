@@ -41,7 +41,7 @@
         <div class="chart-foot"><span id="chart-caption">Speed · mm/s</span><span class="mono" id="chart-span">Last 30 seconds</span></div>
       </section>
       <div class="two-up robot-panel">
-        <section class="card"><div class="card-head"><h2>Line sensors</h2><span class="eyebrow">ADC / 4095</span></div><div class="sensors"><div class="sensor-row"><span>Left</span><div class="track"><div class="fill" id="ir-left-bar"></div></div><span class="sensor-value mono" id="ir-left">—</span></div><div class="sensor-row"><span>Centre</span><div class="track"><div class="fill" id="ir-centre-bar"></div></div><span class="sensor-value mono" id="ir-centre">—</span></div><div class="sensor-row"><span>Right</span><div class="track"><div class="fill" id="ir-right-bar"></div></div><span class="sensor-value mono" id="ir-right">—</span></div><div class="sensor-foot"><span id="line-state">Waiting</span><span>Error <b class="mono" id="line-error">—</b></span></div></div></section>
+        <section class="card"><div class="card-head"><h2>IR sensors</h2><span class="eyebrow">ADC / 4095</span></div><div class="sensors"><div class="sensor-row"><span>Left</span><div class="track"><div class="fill" id="ir-left-bar"></div></div><span class="sensor-value mono" id="ir-left">—</span></div><div class="sensor-row"><span>Right</span><div class="track"><div class="fill" id="ir-line-right-bar"></div></div><span class="sensor-value mono" id="ir-line-right">—</span></div><div class="sensor-row"><span>Barcode</span><div class="track"><div class="fill" id="ir-barcode-bar"></div></div><span class="sensor-value mono" id="ir-barcode">—</span></div><div class="sensor-foot"><span id="line-state">Waiting</span><span>Error <b class="mono" id="line-error">—</b></span></div></div></section>
         <section class="card"><div class="card-head"><h2>Terrain & attitude</h2><span class="eyebrow" id="terrain-state">Waiting</span></div><div class="terrain"><div class="pitch-visual" aria-hidden="true"><div class="robot-line" id="robot-pitch"></div></div><div class="kv-row"><span>Pitch</span><span class="mono" id="pitch">—</span></div><div class="kv-row"><span>Peak height</span><span class="mono" id="peak">—</span></div><div class="kv-row"><span>On hump</span><span id="hump">—</span></div></div></section>
       </div>
     </div>
@@ -63,7 +63,10 @@ let state=null, samples=[], paused=false, windowSeconds=30, selected='__motion',
 const fmt = value => value === undefined || value === null ? '—' : typeof value === 'number' ? value.toLocaleString(undefined,{maximumFractionDigits:2}) : String(value);
 const put = (id,value) => {$(id).textContent=fmt(value)};
 const label = (field,value) => names[field]?.[value] ?? fmt(value);
-const human = key => key.replaceAll('_',' ');
+// Legacy wire names follow ADC order: GP26 left, GP27 right, GP28 barcode.
+const irSensors = {ir_left:{id:'ir-left',label:'Left IR'},ir_centre:{id:'ir-line-right',label:'Right IR'},ir_right:{id:'ir-barcode',label:'Barcode IR'}};
+const irLabel = key => displayed?.custom ? undefined : irSensors[key]?.label;
+const human = key => irLabel(key) ?? key.replaceAll('_',' ');
 const number = value => typeof value === 'number' && Number.isFinite(value);
 faultNames.forEach((name,i)=>{const span=document.createElement('span');span.className='fault-tag';span.textContent=name;span.id=`fault-${i}`;$('fault-tags').append(span)});
 function renderControls(s){
@@ -115,7 +118,7 @@ function render(s){
     put('obstacle',label('obstacle_state',v.obstacle_state));put('encoder-left',v.encoder_left);put('encoder-right',v.encoder_right);put('servo',v.servo_deg===undefined?undefined:`${v.servo_deg}°`);
     put('barcode',v.barcode_valid?label('barcode_command',v.barcode_command):'No valid code');
     put('robot-links',v.link===undefined?'— / —':`${v.link&1?'Up':'Down'} / ${v.link&2?'Up':'Down'}`);
-    for(const side of ['left','centre','right']){put(`ir-${side}`,v[`ir_${side}`]);$(`ir-${side}-bar`).style.width=`${Math.max(0,Math.min(100,(v[`ir_${side}`]??0)/4095*100))}%`}
+    for(const [key,{id}] of Object.entries(irSensors)){put(id,v[key]);$(`${id}-bar`).style.width=`${Math.max(0,Math.min(100,(v[key]??0)/4095*100))}%`}
     put('line-state',label('line_state',v.line_state));put('line-error',v.line_error);put('terrain-state',label('terrain',v.terrain));put('pitch',v.pitch_deg===undefined?undefined:`${v.pitch_deg}°`);
     $('robot-pitch').style.transform=`rotate(${-Number(v.pitch_deg??0)}deg)`;put('peak',v.height_valid?`${v.peak_mm} mm`:'Not valid');put('hump',v.on_hump===undefined?undefined:v.on_hump?'Yes':'No');
     const mask=v.faults??0, fatal=mask&0x7ef;
@@ -147,7 +150,7 @@ function render(s){
 function renderFields(){
   const v=displayed?.latest?.values??{}, query=$('field-search').value.toLowerCase();
   $('fields').replaceChildren();
-  Object.entries(v).filter(([key])=>key.toLowerCase().includes(query)).forEach(([key,value])=>{const item=document.createElement('div');item.className='field';const name=document.createElement('label');name.textContent=key;const val=document.createElement('b');val.className='mono';val.textContent=fmt(value);item.append(name,val);$('fields').append(item)});
+  Object.entries(v).filter(([key])=>`${key} ${irLabel(key)??''}`.toLowerCase().includes(query)).forEach(([key,value])=>{const item=document.createElement('div');item.className='field';const name=document.createElement('label');name.textContent=irLabel(key)??key;name.title=key;const val=document.createElement('b');val.className='mono';val.textContent=fmt(value);item.append(name,val);$('fields').append(item)});
   put('field-count',`${Object.keys(v).length} decoded fields · raw packet`);put('wire',displayed?.latest?`HEX / ${displayed.latest.hex}`:'No packet received yet.');
 }
 function drawChart(){

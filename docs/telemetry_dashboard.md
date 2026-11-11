@@ -93,12 +93,19 @@ well as subscribing to telemetry, status and acknowledgements.
 
 - Start and Stop buttons with robot acknowledgement and rejection feedback.
 - Ground and wheel speeds, wrapping distance, ultrasonic clearance and rate.
-- Line sensors, pitch, valid peak height, terrain, barcode, servo and encoders.
+- Left, Right and Barcode IR sensors, pitch, valid peak height, terrain, barcode,
+  servo and encoders.
 - Vehicle/controller states and all twelve fault bits, with WiFi/MQTT flags
   marked as advisory according to the firmware's fatal mask.
 - A 15 / 30 / 60 second chart, with any numeric decoded field selectable.
 - A searchable field explorer showing every field and the received packet hex.
 - Connection and decoder events, rejected packet count, and stale data status.
+
+The IR sensor panel, chart selector and field explorer use the physical roles:
+Left (GP26), Right (GP27) and Barcode (GP28). Their telemetry keys remain
+`ir_left`, `ir_centre` and `ir_right`, respectively; these keys also remain in
+CSV exports and can be searched in the field explorer. Hover over an IR field
+label to see its telemetry key.
 
 Readings older than two seconds are marked stale. The last valid values remain
 visible for inspection. MQTT retained messages are ignored because cached

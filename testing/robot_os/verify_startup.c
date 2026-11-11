@@ -67,7 +67,7 @@ int main(void)
                                DATA_FORMATS_FAULT};
     for (unsigned state = 0u; state < sizeof(inactive); ++state)
     {
-        field_write(2u, 3u, inactive[state]);
+        field_write(0u, 3u, inactive[state]);
         for (unsigned sample = 0u; sample < 10000u; ++sample)
         {
             detector.state = (sample & 1u) ? LINE_JUNCTION : LINE_TRACKING;
@@ -77,7 +77,7 @@ int main(void)
     assert(g_queued == 0u);
     assert(g_shared.queue_faults == 0u);
 
-    field_write(2u, 3u, DATA_FORMATS_FOLLOW);
+    field_write(0u, 3u, DATA_FORMATS_FOLLOW);
     detector.state = LINE_JUNCTION;
     line_events(&detector, &reader, 4095u, false, &junction);
     line_events(&detector, &reader, 4095u, false, &junction);

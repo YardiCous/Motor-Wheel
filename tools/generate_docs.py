@@ -58,7 +58,7 @@ def main():
             "## Telemetry wire layout", "",
             "| Field | Bit offset | Bits | Meaning / valid range |",
             "|---|---:|---:|---|"]
-    meanings = {"version": "1; reject other versions", "vehicle": "0..7 state",
+    meanings = {"vehicle": "0..7 state",
                 "distance_mm": "0..4095 mm; wraps; signed delta requires <2048 mm",
                 "speed_mm_second": "0..511; command target is at most 500; sign is separate",
                 "reverse": "0/1, actual centre-speed sign",
@@ -81,9 +81,9 @@ def main():
                   "0..4294967295, unsigned wrapping encoder count"
         data.append(f'| {name} | {offset} | {width} | {meanings.get(name, default)} |')
         offset += width
-    assert offset == 223
-    data += [f'| Reserved padding | 223 | 1 | Must be zero; total {PACKET_BYTES} bytes |', "",
-             "Motion snapshot offset 5 occupies exactly 32 bits: 12+9+1+3+7.",
+    assert offset == 221
+    data += [f'| Reserved padding | 221 | 3 | Must be zero; total {PACKET_BYTES} bytes |', "",
+             "Motion snapshot offset 3 occupies exactly 32 bits: 12+9+1+3+7.",
              "Its full-width heartbeat age must be ≤20 ms before terrain uses it;",
              "the seven-bit stamp alone cannot detect long-stale data after wrap.", "",
              "## Stored controller and ISR fields", "",
@@ -122,9 +122,9 @@ def main():
              "| Barcode queue event | LEFT/RIGHT/STRAIGHT/U-TURN | 2 | One byte; high six bits zero |",
              "| Hump queue event | finished0/1, peak0..255 mm, valid0/1 | 10 | Two bytes; high six bits zero |",
              "| Supervisory queue entry | command2 + sequence4 + arrival32 | 38 | Five bytes; two unused bits zero; age≤500 ms |",
-             "| Telemetry queue entry | application223 + arrival32 | 255 | 32 bytes; one padding bit zero; latest only |",
+             "| Telemetry queue entry | application221 + arrival32 | 253 | 32 bytes; bits 221..223 zero, arrival at bit 224; latest only |",
              "| ACK | echoed command2 + sequence4 + accepted1 | 7 | One byte; bit7 used by transport for malformed messages |",
-             "| Status | protocol version2 + WiFi1 + MQTT1 | 4 | One byte, upper four bits zero |", "",
+             "| Status | WiFi at bit0 + MQTT at bit1 | 2 | One byte, upper six bits zero |", "",
              "## Units, validity and overflow", "",
              "* Encoder deltas use unsigned subtraction in either direction; more than",
              "  64 edges per wheel/10-ms sample is an encoder/range guard fault.",

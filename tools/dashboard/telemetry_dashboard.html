@@ -46,7 +46,7 @@
       </div>
     </div>
     <div class="right-col">
-      <section class="card robot-panel"><div class="card-head"><h2>Robot state</h2><span class="eyebrow" id="protocol">V1 PROTOCOL</span></div><div class="vehicle"><div class="state-display"><span class="state-orb" aria-hidden="true">⌘</span><div><strong id="vehicle">Waiting</strong><small id="motion-mode">No telemetry received</small></div></div><div class="status-grid"><div><label>WiFi / MQTT</label><b id="robot-links">— / —</b></div><div><label>Obstacle routine</label><b id="obstacle">—</b></div><div><label>Left encoder</label><b class="mono" id="encoder-left">—</b></div><div><label>Right encoder</label><b class="mono" id="encoder-right">—</b></div><div><label>Servo angle</label><b id="servo">—</b></div><div><label>Last barcode</label><b id="barcode">—</b></div></div></div></section>
+      <section class="card robot-panel"><div class="card-head"><h2>Robot state</h2></div><div class="vehicle"><div class="state-display"><span class="state-orb" aria-hidden="true">⌘</span><div><strong id="vehicle">Waiting</strong><small id="motion-mode">No telemetry received</small></div></div><div class="status-grid"><div><label>WiFi / MQTT</label><b id="robot-links">— / —</b></div><div><label>Obstacle routine</label><b id="obstacle">—</b></div><div><label>Left encoder</label><b class="mono" id="encoder-left">—</b></div><div><label>Right encoder</label><b class="mono" id="encoder-right">—</b></div><div><label>Servo angle</label><b id="servo">—</b></div><div><label>Last barcode</label><b id="barcode">—</b></div></div></div></section>
       <section class="card robot-panel"><div class="card-head"><h2>Fault monitor</h2><span class="mono muted" id="fault-mask">—</span></div><div class="fault-list"><div class="fault-clear"><span class="check" id="fault-icon">·</span><div><b id="fault-title">Waiting for fault status</b><small id="fault-detail">12 monitored fault flags</small></div></div><div class="fault-tags" id="fault-tags"></div></div></section>
       <section class="card"><div class="card-head"><h2>Stream activity</h2><span class="eyebrow" id="rejected">0 REJECTED</span></div><div class="activity" id="activity"><p class="subhead">Connection and decoder events appear here.</p></div></section>
     </div>
@@ -114,7 +114,7 @@ function render(s){
   }else{
     put('speed',number(v.speed_mm_second)?v.speed_mm_second*(v.reverse?-1:1):undefined);put('direction',s.latest?(v.reverse?'Reverse travel':'Forward travel'):'Waiting for readings');
     put('distance',v.distance_mm);put('range',v.range_cm===0?undefined:v.range_cm===1?'<2':v.range_cm);put('range-note',v.range_cm===0?'No valid echo':v.range_cm===1?'Below measuring range':'Ultrasonic range');
-    put('vehicle',label('vehicle',v.vehicle));put('motion-mode',label('motion_mode',v.motion_mode));put('protocol',v.version?`V${v.version} PROTOCOL`:'V1 PROTOCOL');
+    put('vehicle',label('vehicle',v.vehicle));put('motion-mode',label('motion_mode',v.motion_mode));
     put('obstacle',label('obstacle_state',v.obstacle_state));put('encoder-left',v.encoder_left);put('encoder-right',v.encoder_right);put('servo',v.servo_deg===undefined?undefined:`${v.servo_deg}°`);
     put('barcode',v.barcode_valid?label('barcode_command',v.barcode_command):'No valid code');
     put('robot-links',v.link===undefined?'— / —':`${v.link&1?'Up':'Down'} / ${v.link&2?'Up':'Down'}`);

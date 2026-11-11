@@ -1,3 +1,40 @@
-VECTOR e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e
+VECTOR fa7ffaf71f090000c0ffa76d05b27c00eaffffffff0500000018a01f
+MOTOR: forward, stronger left, 500 mm mismatch -4282 um
+MOTOR: forward, stronger right, 500 mm mismatch -4672 um
+MOTOR: reverse, stronger left, 500 mm mismatch 4282 um
+MOTOR: reverse, stronger right, 500 mm mismatch 4672 um
+TERRAIN: helpers ok (atan2 10deg=1007 5deg=505 30deg=2992 cdeg)
+TERRAIN: calibration ok (60 mg offset -> baseline 60 mg)
+TERRAIN: 10 deg x 300 mm at 250 mm/s -> peak 52.13 mm (expected 52.09 +/- 0.5), report 52 mm
+TERRAIN: 10 deg x 300 mm at 500 mm/s -> peak 51.64 mm (expected 52.09 +/- 0.5), report 52 mm
+TERRAIN: 1 and 2 m/s^2 on flat -> no hump (encoder accel 107 mg at 1 m/s^2)
+TERRAIN: +/-40 mg noise, 30 s at 0.5 m/s -> no whole-car hump, no impact, 0 false one-wheel
+TERRAIN: +/-150 mg noise, 30 s at 0.5 m/s -> no whole-car hump, no impact, 9 false one-wheel
+TERRAIN: measured noise, 60 s on the flat at true 75 mm/s -> 0 false humps
+TERRAIN: measured noise, 60 s on the flat at true 133 mm/s -> 0 false humps
+TERRAIN: measured noise, 60 s on the flat at true 250 mm/s -> 0 false humps
+TERRAIN: 3x300 mg spike ignored; 3-s climb -> invalid, no re-trigger
+TERRAIN: 50-ms stale gap -> peak 52 mm valid; 150-ms gap -> invalid; odometer wrap -> peak 52 mm
+TERRAIN: rolled back 130 mm on 10 deg -> height drops 22.63 mm (expected 22.62)
+TERRAIN: 300-mm hump -> peak saturates at 255, valid=0
+TERRAIN: 1 glitch ridden through (peak 52); 3 -> SENSOR_FAULT; 10 retries in 1 s; recovered to LEVEL
+TERRAIN: 2 g jolt -> IMPACT held 200 ms; 2 g landing ignored; 3 g in gate -> IMPACT
+TERRAIN: classes stationary/accelerating/cruising/turning ok (turn 95 deg/s)
+TERRAIN: one wheel (left) flat-top 10 mm at 250 mm/s -> peak 10 mm
+TERRAIN: one wheel (right) flat-top 10 mm at 250 mm/s -> peak 10 mm
+TERRAIN: one wheel (left) flat-top 10 mm at 500 mm/s -> peak 10 mm
+TERRAIN: one wheel (right) flat-top 10 mm at 500 mm/s -> peak 10 mm
+TERRAIN: second, lower hump -> run peak stays 12 mm; off-level floor after a ramp still ends the hump
+TERRAIN: model of 10 mm ramp, true 75 mm/s, 20-ms step -> clean peak 9 mm; noisy: found 20/20, peak 8..13 mm
+TERRAIN: model of 10 mm ramp, true 133 mm/s, 20-ms step -> clean peak 8 mm; noisy: found 20/20, peak 6..13 mm
+TERRAIN: model of 10 mm ramp, true 250 mm/s, 20-ms step -> clean peak 7 mm; noisy: found 12/20, peak 6..11 mm
+TERRAIN: small lean, 5-mm stone, hand lift, reversing, rocking, hard start -> no one-wheel hump; whole-car hump still 52 mm
+TERRAIN: R500/R300 curves and a spin -> no hump; ramp after a turn and during steering wobble -> found
+TERRAIN: fault, 10-s stuck and impact during a lean -> invalid, best peak stays 10 mm; 2 g ramp jolt ignored
+PASS: terrain (all groups)
 PASS: fields, motion, safety, terrain, line, obstacle, navigation, MQTT
+PASS: real ranging driver trigger, echoes, timeout, reset, timer wrap
+PASS: real clock startup sets 1-us tick after reset and USB boot
+PASS: real OS idle-event gating, queue source and saved diagnostics
+PASS: 70-mm/s body scan, bounded lateral legs and retries
 PASS: Python command encoder and decoder rejection checks

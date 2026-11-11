@@ -30,6 +30,10 @@ come from `app_program/subsystem1/telemetry.h`. This reads configuration without
 compiling or running C, and never exposes WiFi passwords to the browser.
 Restart the launcher after changing configuration or decoder code.
 
+Current telemetry and status payloads have no version field. Flash the updated
+firmware and restart the updated dashboard together: telemetry fields have
+shifted down two bits, and status now uses bit 0 for WiFi and bit 1 for MQTT.
+
 If stream activity reports `ValueError: reserved sensor value`, update both
 `robot_protocol.py` copies and restart the Python launcher. Firmware reports
 `range_cm=1` for a below-2-cm echo; the dashboard displays this as `<2 cm`.

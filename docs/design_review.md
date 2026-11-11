@@ -374,7 +374,7 @@ requirements and conform to the supplied coding standard.
 | Seven tasks and single PWM writer | Retained | Stable ownership and one safety gate | Source and task table |
 | Proposed 32-bit snapshot totals 33 bits | Corrected to 12+9+1+3+7 | Supports 0.5-m/s units and true 32-bit size | Boundary tests and header layout check |
 | Separate integer fault variables | Twelve bits per owner; merged/latched safety mask | Minimum representation and independent clearing | Exhaustive 4096-mask host tests |
-| Text MQTT | Explicit 223-bit binary telemetry plus host decoder | Portable byte order, no padding dependence | C/Python golden vector |
+| Text MQTT | Explicit 221-bit binary telemetry plus host decoder | Portable byte order, no padding dependence | C/Python golden vector |
 | Millimetre running height | 0.01-mm accumulator plus finer remainder; 1-mm report | Retain sub-mm 100-Hz contributions | 0.44-mm-step host test |
 | PWM-sign encoder direction | Actual A/B quadrature | Correct braking/reverse direction | ISR and wrap guard test; physical A/B validation open |
 | On-request vs periodic ultrasonic | 60-ms pings, median every 180 ms, stationary coarse/fine scans | One defined sensing and stopping budget | Driver/state machines; timing capture open |

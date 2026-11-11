@@ -39,21 +39,21 @@
     },
     {
       "message": "Telemetry wire packet",
-      "wide_bytes": 108,
+      "wide_bytes": 104,
       "packed_bytes": 28,
-      "information_bits": 223
+      "information_bits": 221
     },
     {
       "message": "Telemetry queue entry",
-      "wide_bytes": 112,
+      "wide_bytes": 108,
       "packed_bytes": 32,
-      "information_bits": 255
+      "information_bits": 253
     },
     {
       "message": "MQTT status",
-      "wide_bytes": 12,
+      "wide_bytes": 8,
       "packed_bytes": 1,
-      "information_bits": 4
+      "information_bits": 2
     },
     {
       "message": "MQTT acknowledgement",
@@ -90,7 +90,7 @@
     {
       "queue": "Telemetry",
       "depth": 1,
-      "wide_buffer_bytes": 116,
+      "wide_buffer_bytes": 112,
       "packed_buffer_bytes": 36
     },
     {

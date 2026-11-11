@@ -1,4 +1,4 @@
-"""Version-one binary robot protocol, with independent host decoding."""
+"""Binary robot protocol, with independent host decoding."""
 from __future__ import annotations
 
 import argparse
@@ -6,7 +6,7 @@ import json
 
 # Fields appear least-significant bit first. Wire order is independent of ABI.
 FIELDS = [
-    ("version", 2), ("vehicle", 3), ("distance_mm", 12),
+    ("vehicle", 3), ("distance_mm", 12),
     ("speed_mm_second", 9), ("reverse", 1), ("motion_mode", 3),
     ("tick_5ms", 7), ("faults", 12), ("ir_left", 12),
     ("ir_centre", 12), ("ir_right", 12), ("terrain", 3),
@@ -18,23 +18,21 @@ FIELDS = [
     ("wheel_right_offset", 10),
 ]
 PACKET_BYTES = 28
-assert sum(width for _, width in FIELDS) == 223
+assert sum(width for _, width in FIELDS) == 221
 
 
 def decode(payload: bytes) -> dict[str, int | float | bool]:
-    """Reject incompatible layouts before interpreting signed/scaled values."""
+    """Validate length, padding and field ranges before scaling values."""
     if len(payload) != PACKET_BYTES:
         raise ValueError("telemetry requires exactly 28 bytes")
     word = int.from_bytes(payload, "little")
-    if word >> 223:
-        raise ValueError("reserved padding bit is set")
+    if word >> 221:
+        raise ValueError("reserved padding bits are set")
     result = {}
     offset = 0
     for name, width in FIELDS:
         result[name] = (word >> offset) & ((1 << width) - 1)
         offset += width
-    if result["version"] != 1:
-        raise ValueError("unsupported protocol version")
     for name, maximum in [("vehicle", 7), ("speed_mm_second", 511),
                           ("motion_mode", 6), ("terrain", 6),
                           ("range_cm", 400), ("servo_3deg", 60),

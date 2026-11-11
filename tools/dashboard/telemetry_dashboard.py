@@ -192,11 +192,11 @@ class Telemetry:
                         self.event(f'Fault mask changed to {mask}', 'warning' if mask else 'info')
                     self.history.append(sample)
             elif topic == self.topics.get('status'):
-                if len(payload) != 1 or payload[0] & 0xF0 or payload[0] & 3 != 1:
+                if len(payload) != 1 or payload[0] & 0xFC:
                     raise ValueError('Invalid status packet')
                 with self.lock:
-                    self.status = {'time': time.time(), 'wifi': bool(payload[0] & 4),
-                                   'mqtt': bool(payload[0] & 8), 'version': payload[0] & 3}
+                    self.status = {'time': time.time(), 'wifi': bool(payload[0] & 1),
+                                   'mqtt': bool(payload[0] & 2)}
             elif topic == self.topics.get('ack'):
                 if len(payload) != 1:
                     raise ValueError('Acknowledgement requires one byte')
@@ -316,7 +316,7 @@ def demo_loop(state, stop):
     while not stop.is_set():
         t = time.monotonic() - start
         hump = max(0, math.sin(t / 6))
-        values = dict(version=1, vehicle=2, distance_mm=int(t * 240) % 4096,
+        values = dict(vehicle=2, distance_mm=int(t * 240) % 4096,
                       speed_mm_second=int(240 + 35 * math.sin(t)), reverse=0,
                       motion_mode=1, tick_5ms=int(t * 200) % 128, faults=0,
                       ir_left=int(1100 + 400 * math.sin(t)), ir_centre=3200,

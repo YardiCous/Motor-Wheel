@@ -120,11 +120,11 @@ def main():
             for sequence in range(16):
                 assert encode_command(command, sequence)[0] < 64
         try:
-            decode(bytes(28))
+            decode(bytes(27) + b"\x20")
         except ValueError:
             pass
         else:
-            raise AssertionError("decoder accepted a zero protocol version")
+            raise AssertionError("decoder accepted nonzero reserved padding")
         print("PASS: Python command encoder and decoder rejection checks")
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -219,15 +219,19 @@ use bounded nonblocking queues; they never call lwIP or CYW43 directly.
 
 | Topic | Payload |
 |---|---|
-| `robot/telemetry` | 28 bytes; 223 meaningful bits; 4 Hz |
-| `robot/status` | 1 byte; version2, WiFi1, MQTT1 |
+| `robot/telemetry` | 28 bytes; 221 meaningful bits; 4 Hz |
+| `robot/status` | 1 byte; WiFi at bit 0, MQTT at bit 1; upper six bits zero |
 | `robot/command` | 1 byte; command2, sequence4, reserved2=0 |
 | `robot/ack` | 1 byte; echoed command2/sequence4, accepted1, malformed1 |
+
+Payloads have no version field. Telemetry starts with the three-bit vehicle
+state and ends with three zero padding bits. Rebuild and flash the firmware
+and restart the updated dashboard together when adopting this layout.
 
 ```sh
 python3 tools/dashboard/robot_protocol.py command stop 0
 python3 tools/dashboard/robot_protocol.py command start 1
-python3 tools/dashboard/robot_protocol.py decode e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e
+python3 tools/dashboard/robot_protocol.py decode fa7ffaf71f090000c0ffa76d05b27c00eaffffffff0500000018a01f
 ```
 
 Send commands without MQTT retain. Each new MQTT connection requires a fresh

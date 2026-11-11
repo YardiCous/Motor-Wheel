@@ -12,9 +12,9 @@ are reproducible before/after representation models, not historical logs.
 | Hump event | 12 | 2 | 10 |
 | MQTT command | 8 | 1 | 6 |
 | Supervisory queue entry | 12 | 5 | 38 |
-| Telemetry wire packet | 108 | 28 | 223 |
-| Telemetry queue entry | 112 | 32 | 255 |
-| MQTT status | 12 | 1 | 4 |
+| Telemetry wire packet | 104 | 28 | 221 |
+| Telemetry queue entry | 108 | 32 | 253 |
+| MQTT status | 8 | 1 | 2 |
 | MQTT acknowledgement | 16 | 1 | 8 |
 
 ## Actual RTOS buffer allocation
@@ -28,9 +28,9 @@ four-byte length header. Control blocks are unchanged and excluded.
 | Barcode | 4 | 32 | 32 |
 | Hump | 4 | 64 | 32 |
 | Supervisory | 8 | 128 | 96 |
-| Telemetry | 1 | 116 | 36 |
+| Telemetry | 1 | 112 | 36 |
 | ACK | 8 | 128 | 64 |
-| Total | | 548 | 292 |
+| Total | | 544 | 292 |
 
 A one-byte barcode message saves wire/application bytes but does not
 reduce this kernel's per-entry allocation compared with a four-byte

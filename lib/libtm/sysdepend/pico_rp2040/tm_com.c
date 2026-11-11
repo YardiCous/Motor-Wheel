@@ -15,22 +15,8 @@
  *    tm_com.c
  *    T-Monitor Communication low-level device driver (RaspberryPi Pico / Pico W)
  *
- *    Two sinks, because they are good at different things:
- *
- *      UART0   available from libtm_init() onward, needs no host, no
- *              enumeration and no scheduler.  This is the only channel that
- *              works during early boot, inside handlers, and after a fault,
- *              so it stays compiled in as the early/panic mirror.
- *
- *      USB CDC the console you actually read.  Needs the scheduler (its
- *              service task drains the ring) and a host that has enumerated
- *              the device, so it says nothing about early boot.
- *
- *    Output goes to both when both are enabled.  Neither waits indefinitely
- *    on external I/O: the UART wait is bounded and the USB path only appends
- *    under a short SMP ring lock.  This matters -- the original driver spun
- *    forever on a UART flag, which turns any console problem into an
- *    unexplained hang.
+ *    Serial monitor output is disabled for both USB CDC and UART0.
+ *    Keep the input and initialization interfaces available to the kernel.
  */
 
 #include <tk/typedef.h>
@@ -51,45 +37,13 @@
 #define UART_LCR_H	(*(_UW*)(UART_BASE+0x02C))
 #define UART_CR		(*(_UW*)(UART_BASE+0x030))
 
-#define	FR_TXFF		(1<<5)	// Transmit FIFO full
 #define	FR_RXFE		(1<<4)	// Receive FIFO empty
 
-/*
- * Bound on the wait for FIFO space, in loop iterations.  Generous for a
- * 115200 baud character (~87 us) yet still finite, so a UART that is
- * unclocked or held in reset costs a bounded delay and a dropped byte
- * instead of hanging the system.
- */
-#define UART_TX_SPIN_LIMIT	200000
-
-#if TM_CONSOLE_UART
-LOCAL void uart_snd_dat(const UB* buf, INT size)
-{
-	UB	*b;
-	UW	spin;
-
-	for( b = (UB *)buf; size > 0; size--, b++ ){
-		spin = UART_TX_SPIN_LIMIT;
-		while( (UART_FR & FR_TXFF) != 0 ){
-			if( --spin == 0 ) return;	/* give up, drop the rest */
-		}
-		UART_DR = *b;
-	}
-}
-#endif /* TM_CONSOLE_UART */
-
-#if TM_CONSOLE_USB_CDC
-IMPORT void tm_usb_console_put(const UB *buf, INT size);
-#endif
-
+/* Discard every console write, including boot messages and input echoes. */
 EXPORT	void	tm_snd_dat( const UB* buf, INT size )
 {
-#if TM_CONSOLE_USB_CDC
-	tm_usb_console_put(buf, size);
-#endif
-#if TM_CONSOLE_UART
-	uart_snd_dat(buf, size);
-#endif
+	(void)buf;
+	(void)size;
 }
 
 EXPORT	void	tm_rcv_dat( UB* buf, INT size )

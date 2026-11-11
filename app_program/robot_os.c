@@ -1891,11 +1891,6 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     bool     b_forward      = (30u == measured_angle);
     uint32_t previous_state = p_obstacle->state;
     obstacle_sample(p_obstacle, range, true);
-#if (OBSTACLE_TEST || TM_MQTT)
-    tm_printf((UB *)"RANGE: %u cm echoes=%u angle=%u raw=%u,%u,%u\n",
-              (unsigned)range, (unsigned)echoes, (unsigned)measured_angle,
-              (unsigned)ranges[0], (unsigned)ranges[1], (unsigned)ranges[2]);
-#endif /* OBSTACLE_TEST || TM_MQTT */
     /* One scan cycle is bounded below 500 ms and fits uint16_t. */
     obstacle_tick(p_obstacle, (uint16_t)(board_io_time_ms() - start + 100u));
     if ((OBSTACLE_COARSE == previous_state) &&

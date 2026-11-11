@@ -16,7 +16,7 @@ with its `tinyusb`, `cyw43-driver`, and `lwip` submodules. Set `PICO_SDK_PATH` t
 the SDK directory. No new third-party runtime library is required.
 
 ```sh
-# USB console and radio, autonomous operation without MQTT:
+# USB and radio, autonomous operation without MQTT:
 make -C build_make -j8
 
 # Autonomous operation with binary MQTT telemetry and supervisory commands:
@@ -47,6 +47,12 @@ The two standard builds produce:
 Both include the startup and task-priority fixes. Every build checks that
 robot tasks outrank USB and WiFi services. Hold BOOTSEL while connecting USB
 and copy the selected UF2 onto RPI-RP2.
+
+Serial monitor output is disabled for all builds, including boot messages,
+diagnostics, faults, and bench-test reports. USB and UART console writes are
+discarded; MQTT telemetry remains available. Console-output descriptions below
+and in the test guides document the diagnostic messages but no longer produce
+serial output.
 
 GP0/GP1 belong to ultrasonic ranging: use USB console and `CRASH_REPORT=0`.
 The hardware driver rejects UART-console builds that would claim those pins.
@@ -87,9 +93,9 @@ and encoder-controlled turns; only the IMU is stubbed. After a bypass it
 searches for the line and resumes tracking. A valid forward reading at 30 cm
 or nearer starts avoidance. A batch with no echoes reports 400 cm (out of
 range), without latching a fault or blocking START/RESET. This sensor result
-cannot distinguish open space from a disconnected sensor; check for nonzero
-echo counts with a box ahead before a floor run. The USB `RANGE` messages
-show distance, echo count, angle, and raw samples for diagnosis.
+cannot distinguish open space from a disconnected sensor; check the sensor's
+response with a box ahead before a floor run. Range samples are not printed
+to the USB serial monitor.
 Failed pings also print `ECHO` evidence before capture is cleared: kernel wait
 result, capture state (1 waiting for rise, 2 waiting for fall, 3 complete),
 pulse width in microseconds, cumulative rising/falling edge counts, GP0/GP1

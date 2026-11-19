@@ -409,6 +409,12 @@ static void bypass_done(navigation_t * p_navigation, bool b_line_valid)
             if ((p_navigation->b_line_seen) || (0u != ROBOT_NO_LINE))
             {
                 resume_follow(p_navigation);
+                /* Having crossed the tape, it is usually back on the side
+                 * the robot came from: steer gently that way until a sensor
+                 * sees it. 2 = left, 1 = right. */
+                p_navigation->recover =
+                    (0u != ROBOT_NO_LINE) ? 0u
+                                          : (p_navigation->b_left ? 2u : 1u);
             }
             else
             {
@@ -479,7 +485,7 @@ static void bypass_act(navigation_t * p_navigation, uint16_t range_cm,
             break;
 
         case BYPASS_BACK_ALIGN:
-            bypass_move(p_navigation, ROBOT_SENSOR_AHEAD_MM);
+            bypass_move(p_navigation, ROBOT_BYPASS_ALIGN_MM);
             break;
 
         default:

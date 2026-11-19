@@ -33,6 +33,7 @@ typedef struct
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
     bool b_line_seen : 1;
+    uint32_t recover : 2; /* back on the line: 0 no, 1 steer right, 2 left */
     uint32_t side_remaining_mm : 12;
     uint32_t command;
     /* Last barcode letter, or '$' (JUNCTION_NONE) once used at a junction. */

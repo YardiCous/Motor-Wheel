@@ -1172,9 +1172,10 @@ static void line_events(line_t * p_line, scanner_t * p_reader, uint16_t raw,
     }
 }
 
-/** @brief After the hump guard: steer gently back toward the raised side
- * until a line sensor sees the tape, for at most ROBOT_HUMP_RECOVER_MS, and
- * only while following the line.
+/** @brief After the hump guard, or back on the line after an obstacle: steer
+ * gently to one side until a line sensor sees the tape, for at most
+ * ROBOT_HUMP_RECOVER_MS. It steers only while following the line; until then
+ * (the vehicle state may lag a cycle) it just waits.
  */
 static void line_recovery(line_t * p_line, uint32_t vehicle)
 {
@@ -1193,7 +1194,7 @@ static void line_recovery(line_t * p_line, uint32_t vehicle)
                        (line_recover(p_line, 2u == recover,
                                      ROBOT_HUMP_RECOVER_STEER_MM_SECOND));
 
-        if ((b_found) || (b_expired) || (!b_following))
+        if ((b_found) || (b_expired))
         {
             mask = board_io_lock();
             /* A new guard may have started a new recovery meanwhile. */
@@ -1201,7 +1202,7 @@ static void line_recovery(line_t * p_line, uint32_t vehicle)
                                    ? 0u
                                    : g_shared.recover;
             board_io_unlock(mask);
-            tm_printf((UB *)"HUMP RECOVER: %s after steering %s\n",
+            tm_printf((UB *)"LINE RECOVER: %s after steering %s\n",
                       (UB *)(b_found ? "line found" : "gave up"),
                       (UB *)((2u == recover) ? "left" : "right"));
         }
@@ -1453,6 +1454,20 @@ static void navigation_cycle(navigation_t * p_navigation)
                     (LINE_SCAN == field_read(127u, 3u)) ||
                         (LINE_JUNCTION == field_read(127u, 3u)),
                     b_latched);
+
+    if (0u != p_navigation->recover)
+    {
+        /* Back from an obstacle: the same gentle steer-back as after a hump.
+         */
+        uint32_t now           = board_io_time_ms();
+        mask                   = board_io_lock();
+        g_shared.recover       = p_navigation->recover;
+        g_shared.recover_at_ms = now;
+        board_io_unlock(mask);
+        tm_printf((UB *)"BYPASS: back on the line, steering %s to find it\n",
+                  (UB *)((2u == p_navigation->recover) ? "left" : "right"));
+        p_navigation->recover = 0u;
+    }
 
     if ((!b_latched) && (DATA_FORMATS_FAULT == p_navigation->state) &&
         (!p_navigation->b_fault))

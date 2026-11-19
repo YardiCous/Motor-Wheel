@@ -107,8 +107,16 @@
 #define ROBOT_BYPASS_BACK_EXTRA_MM 0u
 #else
 #define ROBOT_NO_LINE 0u
-#define ROBOT_BYPASS_BACK_EXTRA_MM 150u
+/* 19 Nov: drive straight back until a sensor sees the tape; this is only a
+ * safety cap past the expected line (was 150). PROVISIONAL. */
+#define ROBOT_BYPASS_BACK_EXTRA_MM 400u
 #endif /* OBSTACLE_NO_LINE */
+/* Tape seen on the way back: carry on this far (the sensors sit this far
+ * ahead of the wheels, so the wheels end on the tape), then turn along the
+ * line and steer gently until a sensor sees it (as after a hump). */
+#ifndef ROBOT_BYPASS_ALIGN_MM
+#define ROBOT_BYPASS_ALIGN_MM ROBOT_SENSOR_AHEAD_MM
+#endif /* ROBOT_BYPASS_ALIGN_MM */
 #ifndef ROBOT_BYPASS_MAX_STEPS
 #define ROBOT_BYPASS_MAX_STEPS 15u
 #endif /* ROBOT_BYPASS_MAX_STEPS */

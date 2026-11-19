@@ -40,8 +40,8 @@ to measure real `sizeof`/alignment. Seven packed contexts total 104 bytes instea
 of 372 (268 bytes / 72.04% reduction). These task-local type sizes are separate
 from fixed task-stack reservations, not an extra static-BSS saving.
 
-The six bounded queues require 292 buffer bytes rather than the equivalent wide
-model's 648 bytes. Telemetry on the wire is 28 bytes rather than 108 bytes in the
+The six bounded queues require 296 buffer bytes rather than the equivalent wide
+model's 556 bytes. Telemetry on the wire is 29 bytes rather than 116 bytes in the
 explicit wide reference. Kernel length headers/alignment are included in the queue
 comparison. No unmeasured historical JSON/text size is claimed.
 

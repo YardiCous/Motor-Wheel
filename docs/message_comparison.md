@@ -8,12 +8,12 @@ are reproducible before/after representation models, not historical logs.
 |---|---:|---:|---:|
 | Motion snapshot | 20 | 4 | 32 |
 | Motion command | 16 | 3 | 24 |
-| Barcode event | 4 | 1 | 2 |
+| Barcode event | 4 | 1 | 5 |
 | Hump event | 12 | 2 | 10 |
 | MQTT command | 8 | 1 | 6 |
 | Supervisory queue entry | 12 | 5 | 38 |
-| Telemetry wire packet | 112 | 28 | 223 |
-| Telemetry queue entry | 116 | 32 | 255 |
+| Telemetry wire packet | 116 | 29 | 228 |
+| Telemetry queue entry | 120 | 33 | 260 |
 | MQTT status | 8 | 1 | 2 |
 | MQTT acknowledgement | 16 | 1 | 8 |
 
@@ -28,9 +28,9 @@ four-byte length header. Control blocks are unchanged and excluded.
 | Barcode | 4 | 32 | 32 |
 | Hump | 4 | 64 | 32 |
 | Supervisory | 8 | 128 | 96 |
-| Telemetry | 1 | 120 | 36 |
+| Telemetry | 1 | 124 | 40 |
 | ACK | 8 | 128 | 64 |
-| Total | | 552 | 292 |
+| Total | | 556 | 296 |
 
 A one-byte barcode message saves wire/application bytes but does not
 reduce this kernel's per-entry allocation compared with a four-byte

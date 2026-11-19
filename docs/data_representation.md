@@ -33,7 +33,7 @@ have the entire unsigned 32-bit modulo range as their valid domain.
 | peak_mm | 93 | 8 | 0..255 mm; overflow sets RANGE and clears validity |
 | range_cm | 101 | 9 | 0 unavailable; 1 below 2 cm; 2..400 cm (400 also no echo) |
 | servo_3deg | 110 | 6 | 0..60 = 0..180 degrees; selected profile angle in PLAN, otherwise commanded servo angle |
-| barcode_event | 116 | 3 | code2 + known1; last valid barcode, not a queue pulse |
+| barcode_event | 116 | 3 | Bits 0–1 are the mapped action (0 left, 1 right, 2 straight, 3 U-turn). Bit 2 marks a valid scan. |
 | line_error_offset | 119 | 8 | 0..254 = -127..127; 255 unused |
 | line_state | 127 | 3 | 0..5 |
 | obstacle_state | 130 | 3 | 0..7 (7 body scan) |
@@ -46,7 +46,12 @@ have the entire unsigned 32-bit modulo range as their valid domain.
 | wheel_right_offset | 211 | 10 | 0..1023 = -512..511 mm/s, bias 512 |
 | lifted | 221 | 1 | 0/1; picked up, wheels stopped, START refused |
 | line_guard | 222 | 1 | 0/1; hump tilt, line held straight |
-| Reserved padding | 223 | 1 | Must be zero; total 28 bytes |
+| Reserved padding | 223 | 1 | Zero |
+| barcode_letter | 224 | 5 | 0 before the first scan, 1–26 for A–Z |
+| Reserved padding | 229 | 3 | Zero |
+
+The barcode fields keep the last scan and its action after the junction.
+Legacy 28-byte packets end at bit 223 and carry only the action.
 
 Motion snapshot offset 3 occupies exactly 32 bits: 12+9+1+3+7.
 Its full-width heartbeat age must be ≤20 ms before terrain uses it;
@@ -294,10 +299,10 @@ and the units for biased fields are described below and in the headers.
 | Task heartbeat / command-arrival / retry deadline / reset time | Full unsigned modulo-2^32 ms | 32 each | Native 32-bit fields; core-0 protected snapshots |
 | Encoder pair | Each full unsigned modulo-2^32 | 64 | ISR writes; task copies both under IRQ mask |
 | Motion command | kind0..3, distance0..4095 mm, speed0..500, reverse0/1 | 24 | Three-byte queue message |
-| Barcode queue event | LEFT/RIGHT/STRAIGHT/U-TURN | 2 | One byte; high six bits zero |
+| Barcode queue event | A–Z or `#` for junction arrival | 5 | One ASCII byte |
 | Hump queue event | finished0/1, peak0..255 mm, valid0/1 | 10 | Two bytes; high six bits zero |
 | Supervisory queue entry | command2 + sequence4 + arrival32 | 38 | Five bytes; two unused bits zero; age≤500 ms |
-| Telemetry queue entry | application223 + arrival32 | 255 | 32 bytes; bit 223 zero, arrival at bit 224; latest only |
+| Telemetry queue entry | application228 + arrival32 | 260 | 33 bytes, arrival at bit 232, latest only |
 | ACK | echoed command2 + sequence4 + accepted1 | 7 | One byte; bit7 used by transport for malformed messages |
 | Status | WiFi at bit0 + MQTT at bit1 | 2 | One byte, upper six bits zero |
 

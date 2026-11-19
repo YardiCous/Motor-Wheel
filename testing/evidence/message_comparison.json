@@ -17,7 +17,7 @@
       "message": "Barcode event",
       "wide_bytes": 4,
       "packed_bytes": 1,
-      "information_bits": 2
+      "information_bits": 5
     },
     {
       "message": "Hump event",
@@ -39,15 +39,15 @@
     },
     {
       "message": "Telemetry wire packet",
-      "wide_bytes": 112,
-      "packed_bytes": 28,
-      "information_bits": 223
+      "wide_bytes": 116,
+      "packed_bytes": 29,
+      "information_bits": 228
     },
     {
       "message": "Telemetry queue entry",
-      "wide_bytes": 116,
-      "packed_bytes": 32,
-      "information_bits": 255
+      "wide_bytes": 120,
+      "packed_bytes": 33,
+      "information_bits": 260
     },
     {
       "message": "MQTT status",
@@ -90,8 +90,8 @@
     {
       "queue": "Telemetry",
       "depth": 1,
-      "wide_buffer_bytes": 120,
-      "packed_buffer_bytes": 36
+      "wide_buffer_bytes": 124,
+      "packed_buffer_bytes": 40
     },
     {
       "queue": "ACK",

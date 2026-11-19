@@ -31,8 +31,9 @@ compiling or running C, and never exposes WiFi passwords to the browser.
 Restart the launcher after changing configuration or decoder code.
 
 Current telemetry and status payloads have no version field. Flash the updated
-firmware and restart the updated dashboard together: telemetry fields have
-shifted down two bits, and status now uses bit 0 for WiFi and bit 1 for MQTT.
+firmware and restart the dashboard to see the Code 39 letter. The dashboard
+accepts both the current 29-byte telemetry packets and earlier 28-byte
+packets. Status uses bit 0 for WiFi and bit 1 for MQTT.
 
 The Terrain card also shows two IMU flags. **Hump guard** is on while a wheel
 climbs a one-wheel hump: the line sensors are held straight and junctions and
@@ -73,7 +74,7 @@ python tools/dashboard/telemetry_dashboard.py --demo
 ```
 
 Demo mode needs only Python 3.10+ and the repository files. It creates valid
-28-byte packets and feeds them through the same decoder as real telemetry.
+29-byte packets and feeds them through the same decoder as real telemetry.
 The dashboard clearly labels simulated readings. Robot Start and Stop controls
 are disabled in demo mode.
 
@@ -104,8 +105,11 @@ well as subscribing to telemetry, status and acknowledgements.
 
 - Start and Stop buttons with robot acknowledgement and rejection feedback.
 - Ground and wheel speeds, wrapping distance, ultrasonic clearance and rate.
-- Left, Right and Barcode IR sensors, pitch, valid peak height, terrain, barcode,
+- Left, Right and Barcode IR sensors, pitch, valid peak height, terrain,
   servo and encoders.
+- The last Code 39 letter and its junction action, such as **Z · Right**.
+  The dashboard keeps showing it after the junction, until the next scan or
+  firmware reboot.
 - Vehicle/controller states and all twelve fault bits, with WiFi/MQTT flags
   marked as advisory according to the firmware's fatal mask.
 - A 15 / 30 / 60 second chart, with any numeric decoded field selectable.

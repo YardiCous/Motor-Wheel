@@ -27,7 +27,7 @@ TOPICS = {'telemetry': 'robot/telemetry', 'status': 'robot/status', 'ack': 'robo
 def with_field(packet, offset, width, value):
     word = int.from_bytes(packet, 'little')
     mask = ((1 << width) - 1) << offset
-    return ((word & ~mask) | (value << offset)).to_bytes(28, 'little')
+    return ((word & ~mask) | (value << offset)).to_bytes(len(packet), 'little')
 
 
 class ProtocolTests(unittest.TestCase):
@@ -38,6 +38,10 @@ class ProtocolTests(unittest.TestCase):
             spec.loader.exec_module(module)
             self.assertNotIn('version', module.decode(VECTOR))
             self.assertEqual(module.decode(bytes(28))['vehicle'], 0)
+            legacy = module.decode(VECTOR)
+            self.assertIsNone(legacy['barcode_letter'])
+            self.assertTrue(legacy['barcode_valid'])
+            self.assertEqual(legacy['barcode_command'], 3)
             with self.subTest(decoder=relative, padding_bit=223):
                 with self.assertRaises(ValueError):
                     module.decode(with_field(VECTOR, 223, 1, 1))
@@ -63,6 +67,18 @@ class ProtocolTests(unittest.TestCase):
                 with self.subTest(decoder=relative, invalid=value):
                     with self.assertRaises(ValueError):
                         module.decode(with_field(VECTOR, offset, width, value))
+
+            self.assertIsNone(module.decode(bytes(29))['barcode_letter'])
+            for code in range(1, 27):
+                with self.subTest(decoder=relative, barcode=code):
+                    values = module.decode(VECTOR + bytes([code]))
+                    self.assertEqual(values['barcode_letter'], chr(ord('A') + code - 1))
+                    self.assertEqual(values['barcode_command'], legacy['barcode_command'])
+            for packet in [VECTOR + b'\x1b', VECTOR + b'\x20',
+                           with_field(VECTOR + b'\x1a', 223, 1, 1)]:
+                with self.subTest(decoder=relative, invalid_packet=packet.hex()):
+                    with self.assertRaises(ValueError):
+                        module.decode(packet)
 
 
 def until(predicate, timeout=8):
@@ -385,6 +401,8 @@ class HTTPTests(unittest.TestCase):
                 self.assertGreater(payload['received'], 0)
                 self.assertNotIn('version', payload['latest']['values'])
                 self.assertEqual(payload['latest']['values']['vehicle'], 2)
+                self.assertEqual(payload['latest']['values']['barcode_letter'], 'Z')
+                self.assertEqual(payload['latest']['values']['barcode_command'], 1)
         finally:
             process.terminate()
             _, error = process.communicate(timeout=5)
@@ -398,7 +416,7 @@ MQTT_AVAILABLE = importlib.util.find_spec('paho') is not None and shutil.which('
 class MQTTTests(unittest.TestCase):
     def test_subscribe_reject_and_reconnect(self):
         import paho.mqtt.client as mqtt
-        live_packet = with_field(VECTOR, 35, 12, 0)
+        live_packet = with_field(VECTOR, 35, 12, 0) + b'\x06'
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             port = probe.getsockname()[1]
@@ -473,6 +491,8 @@ class MQTTTests(unittest.TestCase):
             self.assertFalse(state.snapshot()['controls']['can_start'])
             self.assertTrue(state.snapshot()['controls']['can_stop'])
             self.assertEqual(state.snapshot()['latest']['values']['pitch_deg'], -5.0)
+            self.assertEqual(state.snapshot()['latest']['values']['barcode_letter'], 'F')
+            self.assertEqual(state.snapshot()['latest']['values']['barcode_command'], 3)
         finally:
             if publisher:
                 publisher.disconnect()

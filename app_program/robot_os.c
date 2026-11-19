@@ -39,6 +39,11 @@
 #define ROBOT_SOURCE_COUNT 6u
 #define ROBOT_COMMAND_MESSAGE_BYTES 5u
 #define ROBOT_COMMAND_DEPTH 8u
+#define ROBOT_TELEMETRY_MESSAGE_BYTES (DATA_FORMATS_TELEMETRY_BYTES + 4u)
+/* The RTOS rounds messages to four bytes and adds a four-byte header. */
+#define ROBOT_TELEMETRY_BUFFER_BYTES \
+    (((ROBOT_TELEMETRY_MESSAGE_BYTES + 3u) & ~3u) + 4u)
+#define ROBOT_TELEMETRY_TIME_OFFSET (DATA_FORMATS_TELEMETRY_BYTES * 8u)
 #define ROBOT_PERCEPTION_BUDGET 4u
 #define ROBOT_TASK_STACK 2048
 #define ROBOT_SOURCE_MOTION 0u
@@ -302,10 +307,12 @@ bool robot_os_submit(uint8_t payload)
 /** @brief One queue slot replaces stale telemetry during a long outage. */
 bool robot_os_telemetry(uint8_t * p_packet)
 {
-    uint8_t message[DATA_FORMATS_TELEMETRY_BYTES + 4u] = {0u};
+    uint8_t message[ROBOT_TELEMETRY_MESSAGE_BYTES] = {0u};
     bool    b_fresh = (gh_telemetry_queue > 0) &&
-                      (32 == tk_rcv_mbf(gh_telemetry_queue, message, TMO_POL));
-    uint32_t arrival = data_formats_read(message, 224u, 32u);
+                      (ROBOT_TELEMETRY_MESSAGE_BYTES ==
+                       tk_rcv_mbf(gh_telemetry_queue, message, TMO_POL));
+    uint32_t arrival = data_formats_read(message, ROBOT_TELEMETRY_TIME_OFFSET,
+                                         32u);
     b_fresh          = b_fresh && ((board_io_time_ms() - arrival) <= 500u);
 
     if (b_fresh)
@@ -494,7 +501,8 @@ static bool create_objects(void)
     gh_barcode_queue   = create_queue(32, 1);
     gh_imu_queue       = create_queue(32, 2);
     gh_command_queue   = create_queue(96, ROBOT_COMMAND_MESSAGE_BYTES);
-    gh_telemetry_queue = create_queue(36, 32);
+    gh_telemetry_queue = create_queue(ROBOT_TELEMETRY_BUFFER_BYTES,
+                                       ROBOT_TELEMETRY_MESSAGE_BYTES);
     gh_ack_queue       = create_queue(64, 1);
     return (gh_echo_flag > 0) && (gh_motion_queue > 0) &&
            (gh_barcode_queue > 0) && (gh_imu_queue > 0) &&
@@ -851,34 +859,42 @@ static void obstacle_task(INT start, void * p_argument)
 #endif /* LINE_TEST */
 }
 
+/** @brief Queue a coherent snapshot, replacing any unsent older snapshot. */
+static void telemetry_enqueue(void)
+{
+    uint8_t packet[ROBOT_TELEMETRY_MESSAGE_BYTES]    = {0u};
+    uint8_t discarded[ROBOT_TELEMETRY_MESSAGE_BYTES] = {0u};
+    uint32_t mask = board_io_lock();
+
+    for (uint8_t index = 0u; index < DATA_FORMATS_TELEMETRY_BYTES; ++index)
+    {
+        packet[index] = g_packet[index];
+    }
+
+    board_io_unlock(mask);
+    (void)data_formats_write(packet, ROBOT_TELEMETRY_TIME_OFFSET, 32u,
+                             board_io_time_ms());
+    ER result = tk_snd_mbf(gh_telemetry_queue, packet,
+                           ROBOT_TELEMETRY_MESSAGE_BYTES, TMO_POL);
+
+    if (E_TMOUT == result)
+    {
+        (void)tk_rcv_mbf(gh_telemetry_queue, discarded, TMO_POL);
+        (void)tk_snd_mbf(gh_telemetry_queue, packet,
+                               ROBOT_TELEMETRY_MESSAGE_BYTES, TMO_POL);
+    }
+}
+
 /** @brief Latest-value delivery bounds RAM during arbitrarily long outages. */
 static void telemetry_task(INT start, void * p_argument)
 {
     (void)start;
     (void)p_argument;
-    uint8_t packet[DATA_FORMATS_TELEMETRY_BYTES + 4u]    = {0u};
-    uint8_t discarded[DATA_FORMATS_TELEMETRY_BYTES + 4u] = {0u};
 
     for (;;)
     {
         wait_release();
-        uint32_t mask = board_io_lock();
-
-        for (uint8_t index = 0u; index < DATA_FORMATS_TELEMETRY_BYTES; ++index)
-        {
-            packet[index] = g_packet[index];
-        }
-
-        board_io_unlock(mask);
-        (void)data_formats_write(packet, 224u, 32u, board_io_time_ms());
-        ER result = tk_snd_mbf(gh_telemetry_queue, packet, 32, TMO_POL);
-
-        if (E_TMOUT == result)
-        {
-            (void)tk_rcv_mbf(gh_telemetry_queue, discarded, TMO_POL);
-            (void)tk_snd_mbf(gh_telemetry_queue, packet, 32, TMO_POL);
-        }
-
+        telemetry_enqueue();
         watchdog_report();
     }
 }
@@ -1264,8 +1280,27 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
 #endif /* OBSTACLE_TEST || LINE_TEST */
 
 #if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!BARCODE_TEST))
-/** @brief Latest line data is combined with consumptive motion events. */
-static void navigation_cycle(navigation_t * p_navigation)
+/** @brief Keep the last scan and its mapped command in each telemetry frame. */
+static void barcode_report(char letter, uint8_t action)
+{
+    static const uint8_t g_commands[] = {
+        [JUNCTION_FORWARD] = DATA_FORMATS_STRAIGHT,
+        [JUNCTION_LEFT]    = DATA_FORMATS_LEFT,
+        [JUNCTION_RIGHT]   = DATA_FORMATS_RIGHT,
+        [JUNCTION_UTURN]   = DATA_FORMATS_UTURN,
+    };
+    uint32_t mask = board_io_lock();
+    (void)data_formats_write(g_packet, DATA_FORMATS_BARCODE_EVENT_OFFSET,
+                             DATA_FORMATS_BARCODE_EVENT_BITS,
+                             DATA_FORMATS_BARCODE_VALID | g_commands[action]);
+    (void)data_formats_write(g_packet, DATA_FORMATS_BARCODE_LETTER_OFFSET,
+                             DATA_FORMATS_BARCODE_LETTER_BITS,
+                             (uint32_t)(letter - 'A' + 1));
+    board_io_unlock(mask);
+}
+
+/** @brief Process queued letters and junction arrivals in scan order. */
+static void navigation_events(navigation_t * p_navigation)
 {
     uint8_t event = 0u;
 
@@ -1288,17 +1323,23 @@ static void navigation_cycle(navigation_t * p_navigation)
         }
         else if (navigation_letter(p_navigation, (char)event))
         {
+            uint8_t action = junction_action((char)event);
+            barcode_report((char)event, action);
             tm_printf((UB *)"BARCODE: read %c, used at the next junction "
                             "(%s)\n",
-                      (int)event,
-                      (UB *)junction_name(junction_action((char)event)));
+                      (int)event, (UB *)junction_name(action));
         }
         else
         {
             /* Only A..Z are junction instructions. */
         }
     }
+}
 
+/** @brief Latest line data is combined with consumptive motion events. */
+static void navigation_cycle(navigation_t * p_navigation)
+{
+    navigation_events(p_navigation);
     uint8_t imu_event[2] = {0u};
     (void)tk_rcv_mbf(gh_imu_queue, imu_event, TMO_POL);
     uint32_t mask          = board_io_lock();
@@ -1607,8 +1648,11 @@ static void line_report(void)
         bool     b_visible = g_shared.b_line_visible;
         bool     b_lost    = g_shared.b_line_lost;
         board_io_unlock(mask);
-        uint32_t barcode = field_read(116u, 3u);
-        int      code    = (0u != (barcode & 4u)) ? (int)(barcode & 3u) : -1;
+        uint32_t barcode = field_read(DATA_FORMATS_BARCODE_EVENT_OFFSET,
+                                       DATA_FORMATS_BARCODE_EVENT_BITS);
+        int code = (0u != (barcode & DATA_FORMATS_BARCODE_VALID))
+                       ? (int)(barcode & 3u)
+                       : -1;
         int speed_l = (int)data_formats_unsign(field_read(201u, 10u), 10u);
         int speed_r = (int)data_formats_unsign(field_read(211u, 10u), 10u);
         tm_printf(

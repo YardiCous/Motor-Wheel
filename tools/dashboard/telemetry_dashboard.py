@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 import uuid
 import webbrowser
 
-from robot_protocol import FIELDS, decode, encode_command
+from robot_protocol import FIELDS, LEGACY_PACKET_BYTES, decode, encode_command
 
 ROOT = Path(__file__).resolve().parents[2]
 HTML = Path(__file__).with_suffix('.html')
@@ -323,7 +323,7 @@ def demo_loop(state, stop):
                       ir_right=int(1100 - 400 * math.sin(t)), terrain=2 if hump > .3 else 1,
                       pitch_offset=int(64 + 20 * hump), peak_mm=int(35 * hump),
                       range_cm=int(100 + 40 * math.sin(t / 4)), servo_3deg=30,
-                      barcode_event=6, line_error_offset=int(127 + 24 * math.sin(t)),
+                      barcode_event=5, line_error_offset=int(127 + 24 * math.sin(t)),
                       line_state=1, obstacle_state=0, link=3, on_hump=int(hump > .3),
                       height_valid=1, encoder_left=int(t * 600) % (1 << 32),
                       encoder_right=int(t * 600) % (1 << 32),
@@ -334,7 +334,9 @@ def demo_loop(state, stop):
         for name, width in FIELDS:
             word |= values[name] << offset
             offset += width
-        state.ingest(state.topics['telemetry'], word.to_bytes(28, 'little'))
+        # Code 39 Z maps to Right in the firmware's junction table.
+        packet = word.to_bytes(LEGACY_PACKET_BYTES, 'little') + bytes([26])
+        state.ingest(state.topics['telemetry'], packet)
         stop.wait(.25)
 
 

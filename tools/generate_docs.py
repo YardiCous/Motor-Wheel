@@ -4,7 +4,8 @@ from pathlib import Path
 import re
 
 from format_c import ROOT, sources
-from robot_protocol import FIELDS, PACKET_BYTES
+from robot_protocol import (BARCODE_LETTER_BITS, FIELDS, LEGACY_PACKET_BYTES,
+                            PACKET_BYTES, PAYLOAD_BITS)
 
 MAXIMUMS = {
     "motion_t": {"mode": 6, "speed": 500, "progress_um": 4095999,
@@ -68,7 +69,7 @@ def main():
                 "peak_mm": "0..255 mm; overflow sets RANGE and clears validity",
                 "range_cm": "0 unavailable; 1 below 2 cm; 2..400 cm (400 also no echo)",
                 "servo_3deg": "0..60 = 0..180 degrees; selected profile angle in PLAN, otherwise commanded servo angle",
-                "barcode_event": "code2 + known1; last valid barcode, not a queue pulse",
+                "barcode_event": "Bits 0–1 are the mapped action (0 left, 1 right, 2 straight, 3 U-turn). Bit 2 marks a valid scan.",
                 "line_error_offset": "0..254 = -127..127; 255 unused",
                 "line_state": "0..5", "obstacle_state": "0..7 (7 body scan)",
                 "link": "WiFi1 | MQTT1", "on_hump": "0/1, whole-hump status",
@@ -84,7 +85,13 @@ def main():
         data.append(f'| {name} | {offset} | {width} | {meanings.get(name, default)} |')
         offset += width
     assert offset == 223
-    data += [f'| Reserved padding | 223 | 1 | Must be zero; total {PACKET_BYTES} bytes |', "",
+    letter_offset = LEGACY_PACKET_BYTES * 8
+    padding_offset = letter_offset + BARCODE_LETTER_BITS
+    data += [f'| Reserved padding | {offset} | 1 | Zero |',
+             f'| barcode_letter | {letter_offset} | {BARCODE_LETTER_BITS} | 0 before the first scan, 1–26 for A–Z |',
+             f'| Reserved padding | {padding_offset} | {PACKET_BYTES * 8 - padding_offset} | Zero |', "",
+             "The barcode fields keep the last scan and its action after the junction.",
+             f"Legacy {LEGACY_PACKET_BYTES}-byte packets end at bit {letter_offset - 1} and carry only the action.", "",
              "Motion snapshot offset 3 occupies exactly 32 bits: 12+9+1+3+7.",
              "Its full-width heartbeat age must be ≤20 ms before terrain uses it;",
              "the seven-bit stamp alone cannot detect long-stale data after wrap.", "",
@@ -121,10 +128,10 @@ def main():
              "| Task heartbeat / command-arrival / retry deadline / reset time | Full unsigned modulo-2^32 ms | 32 each | Native 32-bit fields; core-0 protected snapshots |",
              "| Encoder pair | Each full unsigned modulo-2^32 | 64 | ISR writes; task copies both under IRQ mask |",
              "| Motion command | kind0..3, distance0..4095 mm, speed0..500, reverse0/1 | 24 | Three-byte queue message |",
-             "| Barcode queue event | LEFT/RIGHT/STRAIGHT/U-TURN | 2 | One byte; high six bits zero |",
+             "| Barcode queue event | A–Z or `#` for junction arrival | 5 | One ASCII byte |",
              "| Hump queue event | finished0/1, peak0..255 mm, valid0/1 | 10 | Two bytes; high six bits zero |",
              "| Supervisory queue entry | command2 + sequence4 + arrival32 | 38 | Five bytes; two unused bits zero; age≤500 ms |",
-             "| Telemetry queue entry | application223 + arrival32 | 255 | 32 bytes; bit 223 zero, arrival at bit 224; latest only |",
+             f"| Telemetry queue entry | application{PAYLOAD_BITS} + arrival32 | {PAYLOAD_BITS + 32} | {PACKET_BYTES + 4} bytes, arrival at bit {PACKET_BYTES * 8}, latest only |",
              "| ACK | echoed command2 + sequence4 + accepted1 | 7 | One byte; bit7 used by transport for malformed messages |",
              "| Status | WiFi at bit0 + MQTT at bit1 | 2 | One byte, upper six bits zero |", "",
              "## Units, validity and overflow", "",

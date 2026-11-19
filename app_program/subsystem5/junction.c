@@ -24,7 +24,7 @@ static const uint8_t g_actions[JUNCTION_LETTERS] = {
     JUNCTION_FORWARD, /* N */
     JUNCTION_FORWARD, /* O */
     JUNCTION_FORWARD, /* P */
-    JUNCTION_FORWARD, /* Q */
+    JUNCTION_RIGHT, /* Q */
     JUNCTION_FORWARD, /* R */
     JUNCTION_FORWARD, /* S */
     JUNCTION_FORWARD, /* T */

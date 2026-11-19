@@ -161,7 +161,7 @@ Nonblocking binary command bridge, called by the network owner.
 
 `bool robot_os_telemetry(uint8_t * p_packet);`
 
-Retrieve the latest bounded 28-byte telemetry message.
+Retrieve the latest DATA_FORMATS_TELEMETRY_BYTES wire message.
 
 `void robot_os_network(bool b_wifi, bool b_mqtt);`
 

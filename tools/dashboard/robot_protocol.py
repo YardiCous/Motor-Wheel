@@ -17,17 +17,23 @@ FIELDS = [
     ("encoder_right", 32), ("wheel_left_offset", 10),
     ("wheel_right_offset", 10), ("lifted", 1), ("line_guard", 1),
 ]
-PACKET_BYTES = 28
+LEGACY_PACKET_BYTES = 28
+PACKET_BYTES = LEGACY_PACKET_BYTES + 1
+BARCODE_LETTER_BITS = 5
+PAYLOAD_BITS = 223 + BARCODE_LETTER_BITS
 assert sum(width for _, width in FIELDS) == 223
 
 
-def decode(payload: bytes) -> dict[str, int | float | bool]:
+def decode(payload: bytes) -> dict[str, int | float | bool | str | None]:
     """Validate length, padding and field ranges before scaling values."""
-    if len(payload) != PACKET_BYTES:
-        raise ValueError("telemetry requires exactly 28 bytes")
-    word = int.from_bytes(payload, "little")
+    if len(payload) not in (LEGACY_PACKET_BYTES, PACKET_BYTES):
+        raise ValueError(f"telemetry requires {LEGACY_PACKET_BYTES} or {PACKET_BYTES} bytes")
+    word = int.from_bytes(payload[:LEGACY_PACKET_BYTES], "little")
     if word >> 223:
         raise ValueError("reserved padding bits are set")
+    letter = payload[LEGACY_PACKET_BYTES] if len(payload) == PACKET_BYTES else 0
+    if letter > 26:
+        raise ValueError("barcode letter code exceeds its valid range")
     result = {}
     offset = 0
     for name, width in FIELDS:
@@ -49,6 +55,7 @@ def decode(payload: bytes) -> dict[str, int | float | bool]:
     result["servo_deg"] = result.pop("servo_3deg") * 3
     result["barcode_valid"] = bool(result["barcode_event"] & 4)
     result["barcode_command"] = result.pop("barcode_event") & 3
+    result["barcode_letter"] = chr(ord("A") + letter - 1) if letter else None
     return result
 
 

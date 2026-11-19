@@ -33,7 +33,8 @@ typedef struct
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
     bool b_line_seen : 1;
-    uint32_t recover : 2; /* back on the line: 0 no, 1 steer right, 2 left */
+    bool b_ir_left : 1;  /* GP26 line sensor sees black */
+    bool b_ir_right : 1; /* GP27 line sensor sees black */
     uint32_t side_remaining_mm : 12;
     uint32_t command;
     /* Last barcode letter, or '$' (JUNCTION_NONE) once used at a junction. */
@@ -57,6 +58,9 @@ uint8_t navigation_junction(navigation_t * p_navigation);
 /** @brief Accept the servo scan's route and any measured width. */
 bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm,
                                uint16_t side_mm, bool b_left);
+/** @brief Latest line sensor levels: the line search uses them separately. */
+void navigation_line_sensors(navigation_t * p_navigation, bool b_left_black,
+                             bool b_right_black);
 /** @brief Run one 10-ms arbitration cycle; output is one packed command. */
 void navigation_step(navigation_t * p_navigation, uint8_t motion_mode,
                      bool b_done, bool b_line_valid, bool b_line_lost,

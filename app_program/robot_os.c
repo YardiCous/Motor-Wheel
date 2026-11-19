@@ -80,6 +80,8 @@ typedef struct
     bool     b_line_lost : 1;
     bool     b_line_guard : 1; /* hump tilt: hold the line sensors straight */
     bool     b_lifted : 1;     /* picked up: wheels stop, START waits */
+    bool     b_ir_left : 1;    /* GP26 line sensor sees black */
+    bool     b_ir_right : 1;   /* GP27 line sensor sees black */
     uint32_t recover : 2;      /* after a hump: 0 no, 1 steer right, 2 left */
     uint32_t recover_at_ms;    /* when the post-hump steering began */
     uint32_t reset_at_ms;
@@ -1132,6 +1134,8 @@ static void line_cycle(line_t * p_line, scanner_t * p_reader,
     mask                    = board_io_lock();
     g_shared.b_line_visible = b_valid && (p_line->b_line_valid);
     g_shared.b_line_lost    = p_line->b_lost;
+    g_shared.b_ir_left  = b_valid && (samples[0] >= p_line->threshold_left);
+    g_shared.b_ir_right = b_valid && (samples[1] >= p_line->threshold_centre);
     board_io_unlock(mask);
     heartbeat(1u);
 }
@@ -1425,7 +1429,10 @@ static void navigation_cycle(navigation_t * p_navigation)
     mask                 = board_io_lock();
     bool b_line_valid    = g_shared.b_line_visible;
     bool b_line_lost     = g_shared.b_line_lost;
+    bool b_ir_left       = g_shared.b_ir_left;
+    bool b_ir_right      = g_shared.b_ir_right;
     board_io_unlock(mask);
+    navigation_line_sensors(p_navigation, b_ir_left, b_ir_right);
     uint32_t obstacle_word  = field_read(101u, 9u);
     uint32_t obstacle_state = field_read(130u, 3u);
     bool     b_scan_ready   = (OBSTACLE_PLAN == obstacle_state);
@@ -1454,20 +1461,6 @@ static void navigation_cycle(navigation_t * p_navigation)
                     (LINE_SCAN == field_read(127u, 3u)) ||
                         (LINE_JUNCTION == field_read(127u, 3u)),
                     b_latched);
-
-    if (0u != p_navigation->recover)
-    {
-        /* Back from an obstacle: the same gentle steer-back as after a hump.
-         */
-        uint32_t now           = board_io_time_ms();
-        mask                   = board_io_lock();
-        g_shared.recover       = p_navigation->recover;
-        g_shared.recover_at_ms = now;
-        board_io_unlock(mask);
-        tm_printf((UB *)"BYPASS: back on the line, steering %s to find it\n",
-                  (UB *)((2u == p_navigation->recover) ? "left" : "right"));
-        p_navigation->recover = 0u;
-    }
 
     if ((!b_latched) && (DATA_FORMATS_FAULT == p_navigation->state) &&
         (!p_navigation->b_fault))

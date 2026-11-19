@@ -404,17 +404,12 @@ static void bypass_done(navigation_t * p_navigation, bool b_line_valid)
             break;
 
         default:
-            /* BACK_TURN finished: on the line if tape stopped the return
-             * leg, otherwise beside it, so sweep for it. */
-            if ((p_navigation->b_line_seen) || (0u != ROBOT_NO_LINE))
+            /* BACK_TURN finished. A sensor on the tape: follow at once.
+             * Otherwise (19 Nov, the team's choice) sweep for it: left 90,
+             * then back through centre to right 90, stopping on the tape. */
+            if ((b_line_valid) || (0u != ROBOT_NO_LINE))
             {
                 resume_follow(p_navigation);
-                /* Having crossed the tape, it is usually back on the side
-                 * the robot came from: steer gently that way until a sensor
-                 * sees it. 2 = left, 1 = right. */
-                p_navigation->recover =
-                    (0u != ROBOT_NO_LINE) ? 0u
-                                          : (p_navigation->b_left ? 2u : 1u);
             }
             else
             {
@@ -678,13 +673,28 @@ static void start_search(navigation_t * p_navigation, bool b_line_valid)
           ROBOT_TURN_MM_SECOND, true);
 }
 
+/** @brief Latest left (GP26) and right (GP27) line sensor levels. */
+void navigation_line_sensors(navigation_t * p_navigation, bool b_left_black,
+                             bool b_right_black)
+{
+    p_navigation->b_ir_left  = b_left_black;
+    p_navigation->b_ir_right = b_right_black;
+}
+
 /** @brief A finished left turn is followed by a right turn of twice the arc,
  * so the sensors pass back through centre and sweep the right side as well.
  */
 static void step_search(navigation_t * p_navigation, bool b_done,
                         bool b_line_valid)
 {
-    p_navigation->line_confirm = b_line_valid
+    /* Straddle mode is centred with the tape between the sensors, so a sweep
+     * waits for the tape to reach the far sensor: turning left (stage 0)
+     * the right one, turning right the left one. Then line following only
+     * has a small correction to make. */
+    bool b_far = (0u == p_navigation->stage) ? p_navigation->b_ir_right
+                                             : p_navigation->b_ir_left;
+    bool b_seen = (0u != ROBOT_LINE_STRADDLE) ? b_far : b_line_valid;
+    p_navigation->line_confirm = b_seen
                                      ? ((p_navigation->line_confirm < 3u)
                                             ? (p_navigation->line_confirm + 1u)
                                             : 3u)

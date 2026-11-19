@@ -18,36 +18,48 @@ have the entire unsigned 32-bit modulo range as their valid domain.
 
 | Field | Bit offset | Bits | Meaning / valid range |
 |---|---:|---:|---|
-| version | 0 | 2 | 1; reject other versions |
-| vehicle | 2 | 3 | 0..7 state |
-| distance_mm | 5 | 12 | 0..4095 mm; wraps; signed delta requires <2048 mm |
-| speed_mm_second | 17 | 9 | 0..511; command target is at most 500; sign is separate |
-| reverse | 26 | 1 | 0/1, actual centre-speed sign |
-| motion_mode | 27 | 3 | 0..6 |
-| tick_5ms | 30 | 7 | 0..127, wraps at 640 ms |
-| faults | 37 | 12 | 12 independent bits, 0..4095 |
-| ir_left | 49 | 12 | 0..4095 ADC counts |
-| ir_centre | 61 | 12 | 0..4095 ADC counts |
-| ir_right | 73 | 12 | 0..4095 ADC counts |
-| terrain | 85 | 3 | 0..6 |
-| pitch_offset | 88 | 7 | 0..127 = -32..31.5 degrees |
-| peak_mm | 95 | 8 | 0..255 mm; overflow sets RANGE and clears validity |
-| range_cm | 103 | 9 | 0 unavailable; 1 below 2 cm; 2..400 cm (400 also no echo) |
-| servo_3deg | 112 | 6 | 0..60 = 0..180 degrees; selected profile angle in PLAN, otherwise commanded servo angle |
-| barcode_event | 118 | 3 | code2 + known1; last valid barcode, not a queue pulse |
-| line_error_offset | 121 | 8 | 0..254 = -127..127; 255 unused |
-| line_state | 129 | 3 | 0..5 |
-| obstacle_state | 132 | 3 | 0..7 (7 body scan) |
-| link | 135 | 2 | WiFi1 | MQTT1 |
-| on_hump | 137 | 1 | 0/1, whole-hump status |
-| height_valid | 138 | 1 | 0/1; never infer validity from a zero height |
-| encoder_left | 139 | 32 | 0..4294967295, unsigned wrapping encoder count |
-| encoder_right | 171 | 32 | 0..4294967295, unsigned wrapping encoder count |
-| wheel_left_offset | 203 | 10 | 0..1023 = -512..511 mm/s, bias 512 |
-| wheel_right_offset | 213 | 10 | 0..1023 = -512..511 mm/s, bias 512 |
-| Reserved padding | 223 | 1 | Must be zero; total 28 bytes |
+| vehicle | 0 | 3 | 0..7 state |
+| distance_mm | 3 | 12 | 0..4095 mm; wraps; signed delta requires <2048 mm |
+| speed_mm_second | 15 | 9 | 0..511; command target is at most 500; sign is separate |
+| reverse | 24 | 1 | 0/1, actual centre-speed sign |
+| motion_mode | 25 | 3 | 0..6 |
+| tick_5ms | 28 | 7 | 0..127, wraps at 640 ms |
+| faults | 35 | 12 | 12 independent bits, 0..4095 |
+| ir_left | 47 | 12 | 0..4095 ADC counts |
+| ir_centre | 59 | 12 | 0..4095 ADC counts |
+| ir_right | 71 | 12 | 0..4095 ADC counts |
+| terrain | 83 | 3 | 0..6 |
+| pitch_offset | 86 | 7 | 0..127 = -32..31.5 degrees |
+| peak_mm | 93 | 8 | 0..255 mm; overflow sets RANGE and clears validity |
+| range_cm | 101 | 9 | 0 unavailable; 1 below 2 cm; 2..400 cm (400 also no echo) |
+| servo_3deg | 110 | 6 | 0..60 = 0..180 degrees; selected profile angle in PLAN, otherwise commanded servo angle |
+| barcode_event | 116 | 3 | Bits 0–1 are the mapped action (0 left, 1 right, 2 straight, 3 U-turn). Bit 2 marks a valid scan. |
+| line_error_offset | 119 | 8 | 0..254 = -127..127; 255 unused |
+| line_state | 127 | 3 | 0..5 |
+| obstacle_state | 130 | 3 | 0..6 (7 in legacy packets) |
+| link | 133 | 2 | WiFi1 | MQTT1 |
+| on_hump | 135 | 1 | 0/1, whole-hump status |
+| height_valid | 136 | 1 | 0/1; never infer validity from a zero height |
+| encoder_left | 137 | 32 | 0..4294967295, unsigned wrapping encoder count |
+| encoder_right | 169 | 32 | 0..4294967295, unsigned wrapping encoder count |
+| wheel_left_offset | 201 | 10 | 0..1023 = -512..511 mm/s, bias 512 |
+| wheel_right_offset | 211 | 10 | 0..1023 = -512..511 mm/s, bias 512 |
+| lifted | 221 | 1 | 0/1; picked up, wheels stopped, START refused |
+| line_guard | 222 | 1 | 0/1; hump tilt, line held straight |
+| Reserved padding | 223 | 1 | Zero |
+| barcode_letter | 224 | 5 | 0 before the first scan, 1–26 for A–Z |
+| Reserved padding | 229 | 3 | Zero |
+| obstacle_width_mm | 232 | 12 | 1–4095 mm, 0 when unavailable |
+| obstacle_width_one_edge | 244 | 1 | Width is twice the detected edge offset |
+| Reserved padding | 245 | 3 | Zero |
 
-Motion snapshot offset 5 occupies exactly 32 bits: 12+9+1+3+7.
+The barcode fields keep the last scan and its action after the junction.
+Legacy 28-byte packets end at bit 223 and carry only the action.
+The 29-byte format includes the letter and ends before obstacle width.
+Width is the sum of two edge offsets or twice the offset of the only visible edge.
+The robot clears the estimate at the start of the next avoidance or on reset.
+
+Motion snapshot offset 3 occupies exactly 32 bits: 12+9+1+3+7.
 Its full-width heartbeat age must be ≤20 ms before terrain uses it;
 the seven-bit stamp alone cannot detect long-stale data after wrap.
 
@@ -99,6 +111,12 @@ and the units for biased fields are described below and in the headers.
 | robot_os / shared_t | `b_network_online` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_visible` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_lost` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `b_line_guard` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `b_lifted` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `b_ir_left` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `b_ir_right` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `recover` | 0..3 | 2 | unsigned bit-field |
+| robot_os / shared_t | `recover_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / shared_t | `reset_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / cyclic_t | `phase` | 0..99 | 7 | unsigned bit-field |
 | robot_os / buttons_t | `stable_count` | 0..3 | 2 | unsigned bit-field |
@@ -210,6 +228,9 @@ and the units for biased fields are described below and in the headers.
 | terrain / terrain_t | `phase_ms` | 0..16383 | 14 | unsigned bit-field |
 | terrain / terrain_t | `hump_ms` | 0..10000 | 14 | unsigned bit-field |
 | terrain / terrain_t | `gate_ms` | 0..511 | 9 | unsigned bit-field |
+| terrain / terrain_t | `guard_ms` | 0..511 | 9 | unsigned bit-field |
+| terrain / terrain_t | `guard_run` | 0..7 | 3 | unsigned bit-field |
+| terrain / terrain_t | `b_guard_left_up` | 0..1 | 1 | bool bit-field |
 | terrain / terrain_t | `impact_run` | 0..3 | 2 | unsigned bit-field |
 | terrain / terrain_t | `pitch_field` | 0..127 | 7 | unsigned bit-field |
 | terrain / terrain_t | `hump_peak_mm` | 0..255 | 8 | unsigned bit-field |
@@ -231,6 +252,9 @@ and the units for biased fields are described below and in the headers.
 | terrain / terrain_t | `b_impact` | 0..1 | 1 | bool bit-field |
 | terrain / terrain_t | `b_motion_changed` | 0..1 | 1 | bool bit-field |
 | terrain / terrain_t | `b_request_init` | 0..1 | 1 | bool bit-field |
+| terrain / terrain_t | `b_lifted` | 0..1 | 1 | bool bit-field |
+| terrain / terrain_t | `lift_tilt_ms` | 0..511 | 9 | unsigned bit-field |
+| terrain / terrain_t | `settle_ms` | 0..1023 | 10 | unsigned bit-field |
 | navigation / navigation_t | `state` | 0..7 | 3 | unsigned bit-field |
 | navigation / navigation_t | `stage` | 0..11 | 4 | unsigned bit-field |
 | navigation / navigation_t | `b_waiting` | 0..1 | 1 | bool bit-field |
@@ -245,18 +269,16 @@ and the units for biased fields are described below and in the headers.
 | navigation / navigation_t | `b_estop` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `barcode` | 0..3 | 2 | unsigned bit-field |
 | navigation / navigation_t | `elapsed_ms` | 0..10000 | 14 | unsigned bit-field |
-| navigation / navigation_t | `look` | 0..7 | 3 | unsigned bit-field |
-| navigation / navigation_t | `left_cm` | 0..511 | 9 | unsigned bit-field |
-| navigation / navigation_t | `right_cm` | 0..511 | 9 | unsigned bit-field |
 | navigation / navigation_t | `side_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `steps` | 0..31 | 5 | unsigned bit-field |
 | navigation / navigation_t | `b_margin` | 0..1 | 1 | bool bit-field |
-| navigation / navigation_t | `width_mm` | 0..4095 | 12 | unsigned bit-field |
+| navigation / navigation_t | `measured_width_mm` | 0..4095 | 12 | unsigned bit-field |
+| navigation / navigation_t | `b_width_one_edge` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `detected_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `b_first_forward` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `b_line_seen` | 0..1 | 1 | bool bit-field |
-| navigation / navigation_t | `b_body_scan` | 0..1 | 1 | bool bit-field |
-| navigation / navigation_t | `body_index` | 0..15 | 4 | unsigned bit-field |
+| navigation / navigation_t | `b_ir_left` | 0..1 | 1 | bool bit-field |
+| navigation / navigation_t | `b_ir_right` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `side_remaining_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `command` | 0..16777215 | 24 | explicit kind2 + distance12 + speed9 + reverse1; high8 zero |
 | obstacle / obstacle_t | `state` | 0..7 | 3 | unsigned bit-field |
@@ -269,8 +291,10 @@ and the units for biased fields are described below and in the headers.
 | obstacle / obstacle_t | `b_left` | 0..1 | 1 | bool bit-field |
 | obstacle / obstacle_t | `b_valid` | 0..1 | 1 | bool bit-field |
 | obstacle / obstacle_t | `b_ready` | 0..1 | 1 | bool bit-field |
+| obstacle / obstacle_t | `b_width_one_edge` | 0..1 | 1 | bool bit-field |
 | obstacle / obstacle_t | `scan_ms` | 0..8000 | 13 | unsigned bit-field |
 | terrain_test / sim_t | `seed` | 0..4294967295 | 32 | 32-bit modulo counter/time |
+| terrain_test / sim_t | `lifted_steps` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | terrain_test / sim_t | `starts` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | terrain_test / sim_t | `side_starts` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | terrain_test / sim_t | `finishes` | 0..4294967295 | 32 | 32-bit modulo counter/time |
@@ -286,12 +310,12 @@ and the units for biased fields are described below and in the headers.
 | Task heartbeat / command-arrival / retry deadline / reset time | Full unsigned modulo-2^32 ms | 32 each | Native 32-bit fields; core-0 protected snapshots |
 | Encoder pair | Each full unsigned modulo-2^32 | 64 | ISR writes; task copies both under IRQ mask |
 | Motion command | kind0..3, distance0..4095 mm, speed0..500, reverse0/1 | 24 | Three-byte queue message |
-| Barcode queue event | LEFT/RIGHT/STRAIGHT/U-TURN | 2 | One byte; high six bits zero |
+| Barcode queue event | A–Z or `#` for junction arrival | 5 | One ASCII byte |
 | Hump queue event | finished0/1, peak0..255 mm, valid0/1 | 10 | Two bytes; high six bits zero |
 | Supervisory queue entry | command2 + sequence4 + arrival32 | 38 | Five bytes; two unused bits zero; age≤500 ms |
-| Telemetry queue entry | application223 + arrival32 | 255 | 32 bytes; one padding bit zero; latest only |
+| Telemetry queue entry | application241 + arrival32 | 273 | 35 bytes, arrival at bit 248, latest only |
 | ACK | echoed command2 + sequence4 + accepted1 | 7 | One byte; bit7 used by transport for malformed messages |
-| Status | protocol version2 + WiFi1 + MQTT1 | 4 | One byte, upper four bits zero |
+| Status | WiFi at bit0 + MQTT at bit1 | 2 | One byte, upper six bits zero |
 
 ## Units, validity and overflow
 

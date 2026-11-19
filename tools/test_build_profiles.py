@@ -5,8 +5,9 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-MODES = ("MOTOR_TEST", "ENCODER_TEST", "IMU_TEST", "OBSTACLE_TEST", "LINE_TEST")
-SUFFIXES = ("_motortest", "_encodertest", "_imutest", "_obstacletest", "_linetest")
+MODES = ("MOTOR_TEST", "ENCODER_TEST", "OBSTACLE_TEST", "LINE_TEST", "BARCODE_TEST")
+SUFFIXES = ("_motortest", "_encodertest", "_obstacle_nolinetest", "_linetest")
+BARCODE_SUFFIXES = ("", "_barcoderaw", "_barcodedecode")
 BASE_IMAGE = "mtk3pico_smp1_usb_cdc"
 
 
@@ -18,8 +19,8 @@ def main():
     assert separator, "Could not locate the end of profile selection"
     selection += "\n.PHONY: check_profile\ncheck_profile:\n"
     selection += "\t@printf '%s\\n' '$(EXE_FILE)' "
-    selection += "'$(MOTOR_TEST) $(ENCODER_TEST) $(IMU_TEST) "
-    selection += "$(OBSTACLE_TEST) $(LINE_TEST) $(BODY_SCAN)'\n"
+    selection += "'$(MOTOR_TEST) $(ENCODER_TEST) $(OBSTACLE_TEST) "
+    selection += "$(LINE_TEST) $(BARCODE_TEST)'\n"
 
     with tempfile.TemporaryDirectory(prefix="motor-profiles-") as temporary:
         makefile = Path(temporary) / "profiles.mk"
@@ -34,32 +35,30 @@ def main():
 
         defaults = check([])
         assert defaults.returncode == 0, defaults.stderr
-        assert defaults.stdout.splitlines() == [BASE_IMAGE, "0 0 0 0 0 0"]
+        assert defaults.stdout.splitlines() == [BASE_IMAGE, "0 0 0 0 0"]
         allowed = 0
         rejected = 0
-        for values in product((0, 1), repeat=len(MODES)):
-            motor, encoder, imu, obstacle, line = values
-            valid = ((motor + encoder + obstacle + line) <= 1 and
-                     not (imu and (encoder or obstacle or line)))
-            for body in (0, 1):
-                options = [f"{name}={value}" for name, value in zip(MODES, values)]
-                result = check([*options, f"BODY_SCAN={body}"])
-                if not valid:
-                    assert result.returncode != 0, options
-                    assert ("Use only one bench test" in result.stderr or
-                            "IMU_TEST=1 is only supported" in result.stderr)
-                    rejected += 1
-                    continue
-                assert result.returncode == 0, result.stderr
-                suffix = "".join(s for s, v in zip(SUFFIXES, values) if v)
-                suffix += "_bodyscan" if body else ""
-                expected_values = " ".join(map(str, (*values, body)))
-                assert result.stdout.splitlines() == [
-                    BASE_IMAGE + suffix, expected_values], options
-                allowed += 1
+        for values in product(*(range(2) for _ in SUFFIXES), range(3)):
+            valid = sum(value != 0 for value in values) <= 1
+            options = [f"{name}={value}" for name, value in zip(MODES, values)]
+            result = check(options)
+            if not valid:
+                assert result.returncode != 0, options
+                assert ("Use only one bench test" in result.stderr or
+                        "BARCODE_TEST cannot be combined" in result.stderr)
+                rejected += 1
+                continue
+            assert result.returncode == 0, result.stderr
+            suffix = "".join(s for s, v in zip(SUFFIXES, values) if v)
+            suffix += BARCODE_SUFFIXES[values[-1]]
+            expected_values = " ".join(map(str, values))
+            assert result.stdout.splitlines() == [
+                BASE_IMAGE + suffix, expected_values], options
+            allowed += 1
 
-        for name in (*MODES, "BODY_SCAN"):
-            for invalid in ("2", "-1", "yes"):
+        for name in MODES:
+            first_invalid = "3" if name == "BARCODE_TEST" else "2"
+            for invalid in (first_invalid, "-1", "yes"):
                 result = check([f"{name}={invalid}"])
                 assert result.returncode != 0, (name, invalid)
                 assert f"Unknown {name}" in result.stderr, result.stderr

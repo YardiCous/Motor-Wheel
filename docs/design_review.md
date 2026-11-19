@@ -192,11 +192,8 @@ acknowledgement before issuing its replacement FOLLOW command.
 stateDiagram-v2
     [*] --> IDLE
     IDLE --> COARSE: scan requested and motors stopped
-    COARSE --> PLAN: 21 points, both edges found, a side has clearance
-    COARSE --> BODY: edges or side route not established
+    COARSE --> PLAN: 21 points and a confirmed front face
     COARSE --> ABORT: invalid batches, front unconfirmed, 8-s deadline
-    BODY --> BYPASS: wider width and side clearance established
-    BODY --> ABORT: invalid samples, missing edges, blocked route
     PLAN --> BYPASS: first motion accepted
     BYPASS --> RECOVER: bypass complete
     RECOVER --> IDLE: line reacquired / FOLLOW resumes
@@ -207,33 +204,26 @@ The servo scans 60°..120° in 3-degree increments (±30° around forward).
 Twenty-one settled points estimate the obstacle edges. A ray counts as beyond
 an edge when its forward projection exceeds the centre face by 50 mm. Width
 is the sum of the two edge offsets, each estimated as centre distance times
-the tangent of the first clear angle. Unseen edges or inadequate side views
-request body measurement (`scan=7`) instead of immediately faulting. With the
-servo centred, the robot turns left 90 degrees, samples at 15-degree intervals
-through right 90 degrees, then returns to its original heading. Rays up to
-75 degrees bound width, and the 90-degree endpoints measure side clearance.
-Cumulative calibrated turn targets prevent rounding drift across increments.
-The body scan rejects invalid samples and unbounded widths. The flat-face
-geometry is approximate and affected by sensor offset from the rotation
-centre; robot footprint, mounting, and turn calibration need floor validation.
+the tangent of the first clear angle. If the servo sees one edge, telemetry
+reports twice its offset as a width estimate. The plan prefers a measured
+edge with room, or starts on the more
+open side and checks clearance after turning. The flat-face geometry depends
+on sensor placement and beam spread.
 Each point uses up to three echoes, spaced at least 60 ms; servo changes settle
 for 100 ms. No echo retains the existing 400-cm out-of-range convention, but
 an all-empty scan cannot create a valid width. Side rays are not published as
 forward range. A complete scan must finish within 8 seconds.
 
-Bypass sequence: turn 90° to the selected side, move full estimated width plus
-150 mm clearance, turn back 90°, and move the saved obstacle-detection range.
-Quarter turns use 98 mm of calibrated wheel travel. Fresh forward readings
-check each initial leg after its turn. The first forward leg reaches the
-original obstacle face, so bounded step-and-check moves continue until its
-depth has cleared, followed by a 200-mm forward margin. The robot then returns
-toward the line, turns back 90°, and performs bounded line recovery. Each leg
+The robot turns 90° to the selected side, moves past the estimated edge by
+its turning radius plus 50 mm, and turns back 90°. Fresh forward readings
+check each initial leg after its turn. The initial forward target adds the
+robot's length to the saved detection distance. Bounded step-and-check moves
+continue until the depth has cleared, followed by a forward margin. The robot
+then returns toward the line, turns back 90°, and performs bounded line recovery. Each leg
 has a 10-second deadline. Width and motion are limited to the command fields.
 Large lateral offsets are split into checked legs limited to eight seconds.
-`BODY_SCAN=1` forces body measurement even after a successful servo scan;
-normal builds automatically use it when required. The head must face forward
-during body measurement. Clearance below 120 mm aborts motion. Hardware calibration,
-footprint clearance, and physical stopping distance require floor validation.
+Clearance below 120 mm aborts motion. Hardware calibration, footprint
+clearance, and physical stopping distance require floor validation.
 
 ### 6.2 WiFi communication, telemetry and remote interface
 
@@ -374,7 +364,7 @@ requirements and conform to the supplied coding standard.
 | Seven tasks and single PWM writer | Retained | Stable ownership and one safety gate | Source and task table |
 | Proposed 32-bit snapshot totals 33 bits | Corrected to 12+9+1+3+7 | Supports 0.5-m/s units and true 32-bit size | Boundary tests and header layout check |
 | Separate integer fault variables | Twelve bits per owner; merged/latched safety mask | Minimum representation and independent clearing | Exhaustive 4096-mask host tests |
-| Text MQTT | Explicit 223-bit binary telemetry plus host decoder | Portable byte order, no padding dependence | C/Python golden vector |
+| Text MQTT | Explicit 221-bit binary telemetry plus host decoder | Portable byte order, no padding dependence | C/Python golden vector |
 | Millimetre running height | 0.01-mm accumulator plus finer remainder; 1-mm report | Retain sub-mm 100-Hz contributions | 0.44-mm-step host test |
 | PWM-sign encoder direction | Actual A/B quadrature | Correct braking/reverse direction | ISR and wrap guard test; physical A/B validation open |
 | On-request vs periodic ultrasonic | 60-ms pings, median every 180 ms, stationary coarse/fine scans | One defined sensing and stopping budget | Driver/state machines; timing capture open |

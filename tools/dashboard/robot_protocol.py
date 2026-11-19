@@ -1,4 +1,4 @@
-"""Version-one binary robot protocol, with independent host decoding."""
+"""Binary robot protocol, with independent host decoding."""
 from __future__ import annotations
 
 import argparse
@@ -6,7 +6,7 @@ import json
 
 # Fields appear least-significant bit first. Wire order is independent of ABI.
 FIELDS = [
-    ("version", 2), ("vehicle", 3), ("distance_mm", 12),
+    ("vehicle", 3), ("distance_mm", 12),
     ("speed_mm_second", 9), ("reverse", 1), ("motion_mode", 3),
     ("tick_5ms", 7), ("faults", 12), ("ir_left", 12),
     ("ir_centre", 12), ("ir_right", 12), ("terrain", 3),
@@ -15,26 +15,40 @@ FIELDS = [
     ("line_state", 3), ("obstacle_state", 3), ("link", 2),
     ("on_hump", 1), ("height_valid", 1), ("encoder_left", 32),
     ("encoder_right", 32), ("wheel_left_offset", 10),
-    ("wheel_right_offset", 10),
+    ("wheel_right_offset", 10), ("lifted", 1), ("line_guard", 1),
 ]
-PACKET_BYTES = 28
+LEGACY_PACKET_BYTES = 28
+BARCODE_PACKET_BYTES = LEGACY_PACKET_BYTES + 1
+PACKET_BYTES = BARCODE_PACKET_BYTES + 2
+BARCODE_LETTER_BITS = 5
+OBSTACLE_WIDTH_BITS = 12
+OBSTACLE_WIDTH_ONE_EDGE = 1 << OBSTACLE_WIDTH_BITS
+PAYLOAD_BITS = 224 + BARCODE_LETTER_BITS + OBSTACLE_WIDTH_BITS
 assert sum(width for _, width in FIELDS) == 223
 
 
-def decode(payload: bytes) -> dict[str, int | float | bool]:
-    """Reject incompatible layouts before interpreting signed/scaled values."""
-    if len(payload) != PACKET_BYTES:
-        raise ValueError("telemetry requires exactly 28 bytes")
-    word = int.from_bytes(payload, "little")
+def decode(payload: bytes) -> dict[str, int | float | bool | str | None]:
+    """Validate length, padding and field ranges before scaling values."""
+    if len(payload) not in (LEGACY_PACKET_BYTES, BARCODE_PACKET_BYTES, PACKET_BYTES):
+        raise ValueError("telemetry requires 28, 29, or 31 bytes")
+    word = int.from_bytes(payload[:LEGACY_PACKET_BYTES], "little")
     if word >> 223:
-        raise ValueError("reserved padding bit is set")
+        raise ValueError("reserved padding bits are set")
+    letter = payload[LEGACY_PACKET_BYTES] if len(payload) >= BARCODE_PACKET_BYTES else 0
+    if letter > 26:
+        raise ValueError("barcode letter code exceeds its valid range")
+    width_field = int.from_bytes(payload[BARCODE_PACKET_BYTES:], "little")
+    if width_field >> (OBSTACLE_WIDTH_BITS + 1):
+        raise ValueError("reserved obstacle width bits are set")
+    obstacle_width = width_field & (OBSTACLE_WIDTH_ONE_EDGE - 1)
+    one_edge = bool(width_field & OBSTACLE_WIDTH_ONE_EDGE)
+    if one_edge and not obstacle_width:
+        raise ValueError("one-edge flag requires an obstacle width")
     result = {}
     offset = 0
     for name, width in FIELDS:
         result[name] = (word >> offset) & ((1 << width) - 1)
         offset += width
-    if result["version"] != 1:
-        raise ValueError("unsupported protocol version")
     for name, maximum in [("vehicle", 7), ("speed_mm_second", 511),
                           ("motion_mode", 6), ("terrain", 6),
                           ("range_cm", 400), ("servo_3deg", 60),
@@ -51,6 +65,9 @@ def decode(payload: bytes) -> dict[str, int | float | bool]:
     result["servo_deg"] = result.pop("servo_3deg") * 3
     result["barcode_valid"] = bool(result["barcode_event"] & 4)
     result["barcode_command"] = result.pop("barcode_event") & 3
+    result["barcode_letter"] = chr(ord("A") + letter - 1) if letter else None
+    result["obstacle_width_mm"] = obstacle_width or None
+    result["obstacle_width_one_edge"] = one_edge
     return result
 
 

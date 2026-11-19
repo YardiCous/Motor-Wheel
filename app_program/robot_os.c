@@ -39,6 +39,11 @@
 #define ROBOT_SOURCE_COUNT 6u
 #define ROBOT_COMMAND_MESSAGE_BYTES 5u
 #define ROBOT_COMMAND_DEPTH 8u
+#define ROBOT_TELEMETRY_MESSAGE_BYTES (DATA_FORMATS_TELEMETRY_BYTES + 4u)
+/* The RTOS rounds messages to four bytes and adds a four-byte header. */
+#define ROBOT_TELEMETRY_BUFFER_BYTES \
+    (((ROBOT_TELEMETRY_MESSAGE_BYTES + 3u) & ~3u) + 4u)
+#define ROBOT_TELEMETRY_TIME_OFFSET (DATA_FORMATS_TELEMETRY_BYTES * 8u)
 #define ROBOT_PERCEPTION_BUDGET 4u
 #define ROBOT_TASK_STACK 2048
 #define ROBOT_SOURCE_MOTION 0u
@@ -73,6 +78,12 @@ typedef struct
     bool     b_network_online : 1;
     bool     b_line_visible : 1;
     bool     b_line_lost : 1;
+    bool     b_line_guard : 1; /* hump tilt: hold the line sensors straight */
+    bool     b_lifted : 1;     /* picked up: wheels stop, START waits */
+    bool     b_ir_left : 1;    /* GP26 line sensor sees black */
+    bool     b_ir_right : 1;   /* GP27 line sensor sees black */
+    uint32_t recover : 2;      /* after a hump: 0 no, 1 steer right, 2 left */
+    uint32_t recover_at_ms;    /* when the post-hump steering began */
     uint32_t reset_at_ms;
 } shared_t;
 
@@ -106,7 +117,6 @@ typedef struct
 {
     uint8_t  state;
     uint8_t  stage;
-    uint8_t  look;
     uint16_t faults;
     bool     b_avoided;
     uint32_t report_at_ms;
@@ -142,6 +152,7 @@ static ID                gh_telemetry_queue                     = 0;
 static ID                gh_echo_flag                           = 0;
 static ID                gh_ack_queue                           = 0;
 static uint16_t          g_scan_width_mm                        = 0u;
+static bool              g_b_scan_width_one_edge                = false;
 static uint16_t          g_scan_side_mm                         = 0u;
 static ID                gh_cyclic                              = 0;
 
@@ -173,6 +184,7 @@ static void line_cycle(line_t * p_line, scanner_t * p_reader,
 static void line_events(line_t * p_line, scanner_t * p_reader, uint16_t raw,
                         bool b_departure, bool * pb_junction);
 static void line_event(uint8_t event);
+static void line_recovery(line_t * p_line, uint32_t vehicle);
 #endif /* BARCODE_TEST */
 #if OBSTACLE_NO_LINE
 static void line_virtual(void);
@@ -193,6 +205,7 @@ static void bench_look(const navigation_t * p_navigation, uint8_t before,
 #if ((!OBSTACLE_TEST) && (!LINE_TEST))
 static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
                           bool * pb_configured);
+static void terrain_flags(const terrain_t * p_terrain);
 #else
 static void terrain_stub(void);
 #endif /* OBSTACLE_TEST || LINE_TEST */
@@ -206,6 +219,7 @@ static void local_commands(navigation_t * p_navigation);
 static void local_command(navigation_t * p_navigation, uint8_t command,
                           bool b_latched);
 static void remote_commands(navigation_t * p_navigation);
+static void lift_stop(navigation_t * p_navigation);
 static void dispatch_navigation(navigation_t * p_navigation);
 #endif /* MOTOR_TEST && ENCODER_TEST */
 #if !LINE_TEST
@@ -229,8 +243,7 @@ void robot_os_run(void)
     b_ready = b_ready && (create_tasks());
     fault_source(ROBOT_SOURCE_NETWORK,
                  DATA_FORMATS_FAULT_WIFI | DATA_FORMATS_FAULT_MQTT);
-    field_write(0u, 2u, DATA_FORMATS_VERSION);
-    field_write(2u, 3u, DATA_FORMATS_IDLE);
+    field_write(0u, 3u, DATA_FORMATS_IDLE);
 
     if (b_ready)
     {
@@ -300,10 +313,12 @@ bool robot_os_submit(uint8_t payload)
 /** @brief One queue slot replaces stale telemetry during a long outage. */
 bool robot_os_telemetry(uint8_t * p_packet)
 {
-    uint8_t message[DATA_FORMATS_TELEMETRY_BYTES + 4u] = {0u};
+    uint8_t message[ROBOT_TELEMETRY_MESSAGE_BYTES] = {0u};
     bool    b_fresh = (gh_telemetry_queue > 0) &&
-                      (32 == tk_rcv_mbf(gh_telemetry_queue, message, TMO_POL));
-    uint32_t arrival = data_formats_read(message, 224u, 32u);
+                      (ROBOT_TELEMETRY_MESSAGE_BYTES ==
+                       tk_rcv_mbf(gh_telemetry_queue, message, TMO_POL));
+    uint32_t arrival = data_formats_read(message, ROBOT_TELEMETRY_TIME_OFFSET,
+                                         32u);
     b_fresh          = b_fresh && ((board_io_time_ms() - arrival) <= 500u);
 
     if (b_fresh)
@@ -323,7 +338,7 @@ void robot_os_network(bool b_wifi, bool b_mqtt)
     uint16_t faults = b_wifi ? 0u : DATA_FORMATS_FAULT_WIFI;
     faults |= b_mqtt ? 0u : DATA_FORMATS_FAULT_MQTT;
     fault_source(ROBOT_SOURCE_NETWORK, faults);
-    field_write(135u, 2u, (b_wifi ? 1u : 0u) | (b_mqtt ? 2u : 0u));
+    field_write(133u, 2u, (b_wifi ? 1u : 0u) | (b_mqtt ? 2u : 0u));
     uint32_t mask             = board_io_lock();
     bool     b_changed        = (b_mqtt != g_shared.b_network_online);
     g_shared.b_network_online = b_mqtt;
@@ -492,7 +507,8 @@ static bool create_objects(void)
     gh_barcode_queue   = create_queue(32, 1);
     gh_imu_queue       = create_queue(32, 2);
     gh_command_queue   = create_queue(96, ROBOT_COMMAND_MESSAGE_BYTES);
-    gh_telemetry_queue = create_queue(36, 32);
+    gh_telemetry_queue = create_queue(ROBOT_TELEMETRY_BUFFER_BYTES,
+                                       ROBOT_TELEMETRY_MESSAGE_BYTES);
     gh_ack_queue       = create_queue(64, 1);
     return (gh_echo_flag > 0) && (gh_motion_queue > 0) &&
            (gh_barcode_queue > 0) && (gh_imu_queue > 0) &&
@@ -586,7 +602,7 @@ static void safety_task(INT start, void * p_argument)
         mask               = board_io_lock();
         g_shared.b_latched = monitor.b_latched;
         board_io_unlock(mask);
-        field_write(37u, 12u, monitor.faults);
+        field_write(35u, 12u, monitor.faults);
     }
 }
 
@@ -762,6 +778,7 @@ static void navigation_task(INT start, void * p_argument)
         wait_release();
         local_commands(&manager);
         remote_commands(&manager);
+        lift_stop(&manager);
         navigation_cycle(&manager);
 #if OBSTACLE_TEST
         bench_step(&manager, &bench);
@@ -770,7 +787,7 @@ static void navigation_task(INT start, void * p_argument)
         line_report();
 #endif /* LINE_TEST */
         dispatch_navigation(&manager);
-        field_write(2u, 3u, manager.state);
+        field_write(0u, 3u, manager.state);
         heartbeat(3u);
     }
 #endif /* MOTOR_TEST */
@@ -848,34 +865,42 @@ static void obstacle_task(INT start, void * p_argument)
 #endif /* LINE_TEST */
 }
 
+/** @brief Queue a coherent snapshot, replacing any unsent older snapshot. */
+static void telemetry_enqueue(void)
+{
+    uint8_t packet[ROBOT_TELEMETRY_MESSAGE_BYTES]    = {0u};
+    uint8_t discarded[ROBOT_TELEMETRY_MESSAGE_BYTES] = {0u};
+    uint32_t mask = board_io_lock();
+
+    for (uint8_t index = 0u; index < DATA_FORMATS_TELEMETRY_BYTES; ++index)
+    {
+        packet[index] = g_packet[index];
+    }
+
+    board_io_unlock(mask);
+    (void)data_formats_write(packet, ROBOT_TELEMETRY_TIME_OFFSET, 32u,
+                             board_io_time_ms());
+    ER result = tk_snd_mbf(gh_telemetry_queue, packet,
+                           ROBOT_TELEMETRY_MESSAGE_BYTES, TMO_POL);
+
+    if (E_TMOUT == result)
+    {
+        (void)tk_rcv_mbf(gh_telemetry_queue, discarded, TMO_POL);
+        (void)tk_snd_mbf(gh_telemetry_queue, packet,
+                               ROBOT_TELEMETRY_MESSAGE_BYTES, TMO_POL);
+    }
+}
+
 /** @brief Latest-value delivery bounds RAM during arbitrarily long outages. */
 static void telemetry_task(INT start, void * p_argument)
 {
     (void)start;
     (void)p_argument;
-    uint8_t packet[DATA_FORMATS_TELEMETRY_BYTES + 4u]    = {0u};
-    uint8_t discarded[DATA_FORMATS_TELEMETRY_BYTES + 4u] = {0u};
 
     for (;;)
     {
         wait_release();
-        uint32_t mask = board_io_lock();
-
-        for (uint8_t index = 0u; index < DATA_FORMATS_TELEMETRY_BYTES; ++index)
-        {
-            packet[index] = g_packet[index];
-        }
-
-        board_io_unlock(mask);
-        (void)data_formats_write(packet, 224u, 32u, board_io_time_ms());
-        ER result = tk_snd_mbf(gh_telemetry_queue, packet, 32, TMO_POL);
-
-        if (E_TMOUT == result)
-        {
-            (void)tk_rcv_mbf(gh_telemetry_queue, discarded, TMO_POL);
-            (void)tk_snd_mbf(gh_telemetry_queue, packet, 32, TMO_POL);
-        }
-
+        telemetry_enqueue();
         watchdog_report();
     }
 }
@@ -941,7 +966,7 @@ static void motion_cycle(motion_t * p_motion)
     int16_t left_pwm  = 0;
     int16_t right_pwm = 0;
     /* Steering is offset binary in eight bits, with bias 127. */
-    int16_t steering = (int16_t)((int32_t)field_read(121u, 8u) - 127);
+    int16_t steering = (int16_t)((int32_t)field_read(119u, 8u) - 127);
     motion_step(p_motion, left, right, steering,
                 b_latched || (!b_encoder_valid), &left_pwm, &right_pwm);
     board_io_motor(left_pwm, right_pwm);
@@ -955,10 +980,10 @@ static void motion_cycle(motion_t * p_motion)
     uint16_t speed =
         (uint16_t)((signed_speed < 0) ? -signed_speed : signed_speed);
     uint8_t tick = (uint8_t)((board_io_time_ms() / 5u) & 127u);
-    field_write(5u, 32u,
+    field_write(3u, 32u,
                 motion_snapshot(p_motion, tick, speed, signed_speed < 0));
-    field_write(139u, 32u, left);
-    field_write(171u, 32u, right);
+    field_write(137u, 32u, left);
+    field_write(169u, 32u, right);
     bool b_range = wheel_speeds(edges_left, edges_right);
     faults |= b_range ? DATA_FORMATS_FAULT_RANGE : 0u;
     fault_source(ROBOT_SOURCE_MOTION, faults);
@@ -988,8 +1013,8 @@ static bool wheel_speeds(int32_t edges_left, int32_t edges_right)
     speed_left   = (speed_left > 511) ? 511 : speed_left;
     speed_right  = (speed_right < -512) ? -512 : speed_right;
     speed_right  = (speed_right > 511) ? 511 : speed_right;
-    field_write(203u, 10u, data_formats_signed(speed_left, 10u));
-    field_write(213u, 10u, data_formats_signed(speed_right, 10u));
+    field_write(201u, 10u, data_formats_signed(speed_left, 10u));
+    field_write(211u, 10u, data_formats_signed(speed_right, 10u));
     return b_range;
 }
 
@@ -1013,7 +1038,7 @@ static void barcode_drive(void)
     {
         tm_printf((UB *)"BARCODE: START ignored, fault 0x%03x latched: press "
                         "RESET (GP22) first\n",
-                  (unsigned)field_read(37u, 12u));
+                  (unsigned)field_read(35u, 12u));
         return;
     }
 
@@ -1047,11 +1072,11 @@ static void barcode_reset(void)
  */
 static void line_virtual(void)
 {
-    uint32_t vehicle  = field_read(2u, 3u);
+    uint32_t vehicle  = field_read(0u, 3u);
     bool     b_bypass = (DATA_FORMATS_AVOID == vehicle);
     /* 127 is zero steering error in the offset-binary field. */
-    field_write(121u, 8u, 127u);
-    field_write(129u, 3u, LINE_TRACKING);
+    field_write(119u, 8u, 127u);
+    field_write(127u, 3u, LINE_TRACKING);
     uint32_t mask           = board_io_lock();
     g_shared.b_line_ready   = true;
     g_shared.b_line_visible = !b_bypass;
@@ -1068,31 +1093,50 @@ static void line_cycle(line_t * p_line, scanner_t * p_reader,
 {
     uint16_t samples[ROBOT_IR_COUNT] = {0u};
     bool     b_valid                 = board_io_line(samples);
-    uint32_t vehicle                 = field_read(2u, 3u);
+    uint32_t vehicle                 = field_read(0u, 3u);
     bool     b_departure             = (DATA_FORMATS_AVOID == vehicle) ||
                                        (DATA_FORMATS_SEARCH == vehicle) ||
                                        (DATA_FORMATS_BARCODE == vehicle);
-    uint32_t snapshot                = field_read(5u, 32u);
+    uint32_t snapshot                = field_read(3u, 32u);
+    uint32_t mask                    = board_io_lock();
+    bool     b_guard                 = g_shared.b_line_guard;
+    board_io_unlock(mask);
     /* Distance occupies the snapshot's low twelve bits. */
     line_step(p_line, samples, (uint16_t)(snapshot & 4095u), b_departure);
+
+    if (b_guard)
+    {
+        /* One wheel on a hump tilts the sensors: white can read as black.
+         * Humps are on straights, so drive straight and read no junction
+         * or barcode until the guard ends. */
+        line_hold(p_line);
+    }
+    else
+    {
+        line_recovery(p_line, vehicle);
+    }
+
     /* GP28 is the third sample. */
-    line_events(p_line, p_reader, samples[2], b_departure, pb_junction);
-    field_write(121u, 8u, p_line->error);
+    line_events(p_line, p_reader, samples[2], (b_departure) || (b_guard),
+                pb_junction);
+    field_write(119u, 8u, p_line->error);
     /* A barcode under GP28 reports SCAN, which slows line following. */
     bool b_scan = (p_reader->b_scanning) && (LINE_TRACKING == p_line->state);
-    field_write(129u, 3u, b_scan ? LINE_SCAN : p_line->state);
+    field_write(127u, 3u, b_scan ? LINE_SCAN : p_line->state);
 
     for (uint8_t sensor = 0u; sensor < ROBOT_IR_COUNT; ++sensor)
     {
-        field_write(49u + (sensor * 12u), 12u, samples[sensor]);
+        field_write(47u + (sensor * 12u), 12u, samples[sensor]);
     }
 
-    uint32_t mask         = board_io_lock();
+    mask                  = board_io_lock();
     g_shared.b_line_ready = b_valid && (LINE_CALIBRATING != p_line->state);
     board_io_unlock(mask);
     mask                    = board_io_lock();
     g_shared.b_line_visible = b_valid && (p_line->b_line_valid);
     g_shared.b_line_lost    = p_line->b_lost;
+    g_shared.b_ir_left  = b_valid && (samples[0] >= p_line->threshold_left);
+    g_shared.b_ir_right = b_valid && (samples[1] >= p_line->threshold_centre);
     board_io_unlock(mask);
     heartbeat(1u);
 }
@@ -1106,7 +1150,7 @@ static void line_events(line_t * p_line, scanner_t * p_reader, uint16_t raw,
     uint32_t left  = 0u;
     uint32_t right = 0u;
     (void)board_io_encoders(&left, &right);
-    uint32_t vehicle = field_read(2u, 3u);
+    uint32_t vehicle = field_read(0u, 3u);
     bool b_running = (DATA_FORMATS_FOLLOW == vehicle) ||
                      (DATA_FORMATS_HUMP == vehicle);
     bool b_on = (LINE_CALIBRATING != p_line->state) && (!b_departure) &&
@@ -1133,6 +1177,43 @@ static void line_events(line_t * p_line, scanner_t * p_reader, uint16_t raw,
     }
 }
 
+/** @brief After the hump guard, or back on the line after an obstacle: steer
+ * gently to one side until a line sensor sees the tape, for at most
+ * ROBOT_HUMP_RECOVER_MS. It steers only while following the line; until then
+ * (the vehicle state may lag a cycle) it just waits.
+ */
+static void line_recovery(line_t * p_line, uint32_t vehicle)
+{
+    uint32_t mask    = board_io_lock();
+    uint32_t recover = g_shared.recover;
+    uint32_t began   = g_shared.recover_at_ms;
+    board_io_unlock(mask);
+
+    if (0u != recover)
+    {
+        bool b_following = (DATA_FORMATS_FOLLOW == vehicle) ||
+                           (DATA_FORMATS_HUMP == vehicle);
+        bool b_expired =
+            (board_io_time_ms() - began) >= ROBOT_HUMP_RECOVER_MS;
+        bool b_found = (b_following) && (!b_expired) &&
+                       (line_recover(p_line, 2u == recover,
+                                     ROBOT_HUMP_RECOVER_STEER_MM_SECOND));
+
+        if ((b_found) || (b_expired))
+        {
+            mask = board_io_lock();
+            /* A new guard may have started a new recovery meanwhile. */
+            g_shared.recover = (began == g_shared.recover_at_ms)
+                                   ? 0u
+                                   : g_shared.recover;
+            board_io_unlock(mask);
+            tm_printf((UB *)"LINE RECOVER: %s after steering %s\n",
+                      (UB *)(b_found ? "line found" : "gave up"),
+                      (UB *)((2u == recover) ? "left" : "right"));
+        }
+    }
+}
+
 /** @brief A full queue is a fault, as for every other event queue. */
 static void line_event(uint8_t event)
 {
@@ -1154,7 +1235,10 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
     bool     b_reset     = g_shared.b_reset_imu;
     g_shared.b_reset_imu = false;
     uint32_t motion_time = g_heartbeat[0];
+    uint32_t last_step   = g_heartbeat[2];
     board_io_unlock(mask);
+    /* The real time since the last step, for the lift speed estimate. */
+    uint32_t gap = board_io_time_ms() - last_step;
 
     if (b_reset)
     {
@@ -1171,28 +1255,30 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
     input.b_imu_ok =
         (*pb_configured) && (drv_lsm303_accel(p_imu, NULL, input.accel_mg));
     input.b_motion_fresh = (board_io_time_ms() - motion_time) <= 20u;
-    uint32_t snapshot    = field_read(5u, 32u);
+    input.period_ms      = (uint8_t)((gap > 255u) ? 255u : gap);
+    uint32_t snapshot    = field_read(3u, 32u);
     /* The nine-bit speed has maximum magnitude 511. */
     int16_t speed     = (int16_t)((snapshot >> 12u) & 511u);
     speed             = (0u != (snapshot & (1u << 21u))) ? -speed : speed;
     input.speed_mm_s  = speed;
     input.distance_mm = snapshot & 4095u;
-    input.left_mm_s = (int16_t)data_formats_unsign(field_read(203u, 10u), 10u);
+    input.left_mm_s = (int16_t)data_formats_unsign(field_read(201u, 10u), 10u);
     input.right_mm_s =
-        (int16_t)data_formats_unsign(field_read(213u, 10u), 10u);
+        (int16_t)data_formats_unsign(field_read(211u, 10u), 10u);
     terrain_step(p_terrain, &input);
     uint16_t faults =
         (p_terrain->failures >= 3u) ? DATA_FORMATS_FAULT_IMU : 0u;
     faults |= p_terrain->b_impact ? DATA_FORMATS_FAULT_IMPACT : 0u;
     fault_source(ROBOT_SOURCE_IMU, faults);
-    field_write(85u, 3u, p_terrain->state);
-    field_write(88u, 7u, p_terrain->pitch_field);
-    field_write(95u, 8u, p_terrain->run_peak_mm);
-    field_write(137u, 1u, p_terrain->b_on_hump);
-    field_write(138u, 1u, p_terrain->b_peak_valid);
+    field_write(83u, 3u, p_terrain->state);
+    field_write(86u, 7u, p_terrain->pitch_field);
+    field_write(93u, 8u, p_terrain->run_peak_mm);
+    field_write(135u, 1u, p_terrain->b_on_hump);
+    field_write(136u, 1u, p_terrain->b_peak_valid);
     mask                 = board_io_lock();
     g_shared.b_imu_ready = terrain_ready(p_terrain);
     board_io_unlock(mask);
+    terrain_flags(p_terrain);
 
     if ((p_terrain->b_started) || (p_terrain->b_finished))
     {
@@ -1216,11 +1302,84 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
         (void)tk_wup_tsk(gh_tasks[0]);
     }
 }
+
+/** @brief Share the hump guard and lift flags, start the post-hump
+ * steer-back when the guard ends, and report changes.
+ */
+static void terrain_flags(const terrain_t * p_terrain)
+{
+    bool     b_guard      = terrain_line_guard(p_terrain);
+    bool     b_lifted     = terrain_lifted(p_terrain);
+    bool     b_left_up    = terrain_guard_left_up(p_terrain);
+    uint32_t now          = board_io_time_ms();
+    uint32_t mask         = board_io_lock();
+    bool     b_was_guard  = g_shared.b_line_guard;
+    g_shared.b_line_guard = b_guard;
+
+    if (b_guard)
+    {
+        g_shared.recover = 0u;
+    }
+    else if (b_was_guard)
+    {
+        /* Steer back toward the side that was raised. */
+        g_shared.recover       = b_left_up ? 2u : 1u;
+        g_shared.recover_at_ms = now;
+    }
+    else
+    {
+        /* No change: line_cycle() ends any recovery under way. */
+    }
+
+    bool b_was_lifted = g_shared.b_lifted;
+    g_shared.b_lifted = b_lifted;
+    board_io_unlock(mask);
+    /* Dashboard "Picked up" and "Hump guard" rows. */
+    field_write(221u, 1u, b_lifted ? 1u : 0u);
+    field_write(222u, 1u, b_guard ? 1u : 0u);
+
+    if (b_guard != b_was_guard)
+    {
+        const char * p_after = b_left_up ? ", steering left to the line"
+                                         : ", steering right to the line";
+        tm_printf((UB *)"HUMP GUARD: %s (lean %d mg)%s\n",
+                  (UB *)(b_guard ? "on, line held straight" : "off"),
+                  (int)p_terrain->roll_milli, (UB *)(b_guard ? "" : p_after));
+    }
+
+    if (b_lifted != b_was_lifted)
+    {
+        tm_printf((UB *)"LIFTED: %s (up speed %d mm/s, tilt %u ms)\n",
+                  (UB *)(b_lifted ? "picked up, wheels stop"
+                                  : "back on the floor, START works again"),
+                  (int)(p_terrain->lift_speed_um_s / 1000),
+                  (unsigned)p_terrain->lift_tilt_ms);
+    }
+}
 #endif /* OBSTACLE_TEST || LINE_TEST */
 
 #if ((!MOTOR_TEST) && (!ENCODER_TEST) && (!BARCODE_TEST))
-/** @brief Latest line data is combined with consumptive motion events. */
-static void navigation_cycle(navigation_t * p_navigation)
+/** @brief Keep the last scan and its mapped command in each telemetry frame. */
+static void barcode_report(char letter, uint8_t action)
+{
+    static const uint8_t g_commands[] = {
+        [JUNCTION_FORWARD] = DATA_FORMATS_STRAIGHT,
+        [JUNCTION_LEFT]    = DATA_FORMATS_LEFT,
+        [JUNCTION_RIGHT]   = DATA_FORMATS_RIGHT,
+        [JUNCTION_UTURN]   = DATA_FORMATS_UTURN,
+    };
+    uint32_t mask = board_io_lock();
+    (void)data_formats_write(g_packet, DATA_FORMATS_BARCODE_EVENT_OFFSET,
+                             DATA_FORMATS_BARCODE_EVENT_BITS,
+                             DATA_FORMATS_BARCODE_VALID | g_commands[action]);
+    (void)data_formats_write(g_packet, DATA_FORMATS_BARCODE_LETTER_OFFSET,
+                             DATA_FORMATS_BARCODE_LETTER_BITS,
+                             (uint32_t)(letter - 'A' + 1));
+    board_io_unlock(mask);
+}
+
+/** @brief Process queued letters and junction arrivals in scan order. */
+static void navigation_events(navigation_t * p_navigation)
 {
     uint8_t event = 0u;
 
@@ -1243,17 +1402,23 @@ static void navigation_cycle(navigation_t * p_navigation)
         }
         else if (navigation_letter(p_navigation, (char)event))
         {
+            uint8_t action = junction_action((char)event);
+            barcode_report((char)event, action);
             tm_printf((UB *)"BARCODE: read %c, used at the next junction "
                             "(%s)\n",
-                      (int)event,
-                      (UB *)junction_name(junction_action((char)event)));
+                      (int)event, (UB *)junction_name(action));
         }
         else
         {
             /* Only A..Z are junction instructions. */
         }
     }
+}
 
+/** @brief Latest line data is combined with consumptive motion events. */
+static void navigation_cycle(navigation_t * p_navigation)
+{
+    navigation_events(p_navigation);
     uint8_t imu_event[2] = {0u};
     (void)tk_rcv_mbf(gh_imu_queue, imu_event, TMO_POL);
     uint32_t mask          = board_io_lock();
@@ -1261,41 +1426,42 @@ static void navigation_cycle(navigation_t * p_navigation)
     g_shared.b_motion_done = false;
     bool b_latched         = g_shared.b_latched;
     board_io_unlock(mask);
-    uint32_t motion_word = field_read(5u, 32u);
+    uint32_t motion_word = field_read(3u, 32u);
     mask                 = board_io_lock();
     bool b_line_valid    = g_shared.b_line_visible;
     bool b_line_lost     = g_shared.b_line_lost;
+    bool b_ir_left       = g_shared.b_ir_left;
+    bool b_ir_right      = g_shared.b_ir_right;
     board_io_unlock(mask);
-    uint32_t obstacle_word  = field_read(103u, 9u);
-    uint32_t obstacle_state = field_read(132u, 3u);
+    navigation_line_sensors(p_navigation, b_ir_left, b_ir_right);
+    uint32_t obstacle_word  = field_read(101u, 9u);
+    uint32_t obstacle_state = field_read(130u, 3u);
     bool     b_scan_ready   = (OBSTACLE_PLAN == obstacle_state);
-    if ((OBSTACLE_BODY_SCAN == obstacle_state) &&
-        (DATA_FORMATS_AVOID == p_navigation->state) &&
-        (0u == p_navigation->stage))
-    {
-        (void)navigation_body_scan(p_navigation);
-    }
 
-    bool b_scan_left = (field_read(112u, 6u) < 30u);
+    /* The servo half that faces left depends on its mounting. */
+    uint32_t scan_angle  = field_read(110u, 6u);
+    bool     b_scan_left = (0u != ROBOT_SERVO_LEFT_HIGH) ? (scan_angle > 30u)
+                                                         : (scan_angle < 30u);
     if (b_scan_ready && (DATA_FORMATS_AVOID == p_navigation->state) &&
         (0u == p_navigation->stage) && (0u == p_navigation->side_mm))
     {
         mask           = board_io_lock();
         uint16_t width = g_scan_width_mm;
         uint16_t side  = g_scan_side_mm;
+        bool b_one_edge = g_b_scan_width_one_edge;
         board_io_unlock(mask);
-        bool b_plan =
-            navigation_obstacle_route(p_navigation, width, side, b_scan_left);
+        bool b_plan = navigation_obstacle_route(p_navigation, width, side,
+                                                 b_scan_left, b_one_edge);
         p_navigation->b_fault = (p_navigation->b_fault) || (!b_plan);
     }
 
     /* Packet fields are explicitly bounded to their destination widths. */
     navigation_step(p_navigation, (motion_word >> 22u) & 7u, b_done,
-                    b_line_valid, b_line_lost, 0u != field_read(137u, 1u),
+                    b_line_valid, b_line_lost, 0u != field_read(135u, 1u),
                     obstacle_word, obstacle_word >= 2u, b_scan_ready,
                     b_scan_left,
-                    (LINE_SCAN == field_read(129u, 3u)) ||
-                        (LINE_JUNCTION == field_read(129u, 3u)),
+                    (LINE_SCAN == field_read(127u, 3u)) ||
+                        (LINE_JUNCTION == field_read(127u, 3u)),
                     b_latched);
 
     if ((!b_latched) && (DATA_FORMATS_FAULT == p_navigation->state) &&
@@ -1304,6 +1470,12 @@ static void navigation_cycle(navigation_t * p_navigation)
         navigation_init(p_navigation);
     }
 
+    uint32_t width_field = p_navigation->measured_width_mm;
+    width_field |= p_navigation->b_width_one_edge
+                       ? DATA_FORMATS_OBSTACLE_WIDTH_ONE_EDGE
+                       : 0u;
+    field_write(DATA_FORMATS_OBSTACLE_WIDTH_OFFSET,
+                DATA_FORMATS_OBSTACLE_WIDTH_BITS + 1u, width_field);
     uint16_t faults = p_navigation->b_fault ? DATA_FORMATS_FAULT_TIMEOUT : 0u;
     faults |= p_navigation->b_estop ? DATA_FORMATS_FAULT_ESTOP : 0u;
     fault_source(ROBOT_SOURCE_NAV, faults);
@@ -1347,9 +1519,10 @@ static void local_commands(navigation_t * p_navigation)
 
     if (stable_count >= 3u)
     {
-        uint32_t pressed   = (uint32_t)buttons & ~(uint32_t)g_buttons.previous;
-        uint32_t mask      = board_io_lock();
-        bool     b_latched = g_shared.b_latched;
+        uint32_t pressed = (uint32_t)buttons & ~(uint32_t)g_buttons.previous;
+        uint32_t mask    = board_io_lock();
+        /* Only START looks at this: it also waits while the car is lifted. */
+        bool b_latched = (g_shared.b_latched) || (g_shared.b_lifted);
         board_io_unlock(mask);
 
         if (0u != (pressed & 2u))
@@ -1384,10 +1557,29 @@ static void local_command(navigation_t * p_navigation, uint8_t command,
     tm_printf((UB *)"CONTROL: %s %s nav=%u latched=%u faults=0x%03x\n",
               (UB *)p_name, (UB *)(b_accepted ? "accepted" : "rejected"),
               (unsigned)p_navigation->state, b_latched ? 1u : 0u,
-              (unsigned)field_read(37u, 12u));
+              (unsigned)field_read(35u, 12u));
 #else
     (void)b_accepted;
 #endif /* OBSTACLE_TEST */
+}
+
+/** @brief Picked up: stop the wheels the same way the dashboard's STOP does.
+ * START is refused until the IMU says the car is back on the floor.
+ */
+static void lift_stop(navigation_t * p_navigation)
+{
+    uint32_t mask     = board_io_lock();
+    bool     b_lifted = g_shared.b_lifted;
+    board_io_unlock(mask);
+    bool b_moving = (DATA_FORMATS_IDLE != p_navigation->state) &&
+                    (DATA_FORMATS_FAULT != p_navigation->state);
+
+    if ((b_lifted) && (b_moving))
+    {
+        (void)navigation_supervise(p_navigation, DATA_FORMATS_STOP, false);
+        tm_printf((UB *)"LIFTED: stopped. Put the car down, wait 1 s, then "
+                        "press START\n");
+    }
 }
 
 /** @brief Network sequence and age validation happen before mission mutation.
@@ -1407,7 +1599,8 @@ static void remote_commands(navigation_t * p_navigation)
         uint32_t mask    = board_io_lock();
         bool b_new = (!g_shared.b_sequence_valid) ||
                      (data_formats_sequence_new(sequence, g_shared.sequence));
-        bool b_latched = g_shared.b_latched;
+        /* Only START looks at this: it also waits while the car is lifted. */
+        bool b_latched = (g_shared.b_latched) || (g_shared.b_lifted);
         bool b_armed   = g_shared.b_remote_armed;
         board_io_unlock(mask);
         b_valid = b_valid && ((DATA_FORMATS_START != command) || b_armed);
@@ -1528,7 +1721,7 @@ static void line_report(void)
 {
     static uint32_t g_last_ms = 0u;
     uint32_t        now       = board_io_time_ms();
-    uint32_t        mode      = (field_read(5u, 32u) >> 22u) & 7u;
+    uint32_t        mode      = (field_read(3u, 32u) >> 22u) & 7u;
     uint32_t        period    = (MOTION_IDLE == mode) ? 200u : 50u;
 
     if ((now - g_last_ms) >= period)
@@ -1538,26 +1731,29 @@ static void line_report(void)
         bool     b_visible = g_shared.b_line_visible;
         bool     b_lost    = g_shared.b_line_lost;
         board_io_unlock(mask);
-        uint32_t barcode = field_read(118u, 3u);
-        int      code    = (0u != (barcode & 4u)) ? (int)(barcode & 3u) : -1;
-        int speed_l = (int)data_formats_unsign(field_read(203u, 10u), 10u);
-        int speed_r = (int)data_formats_unsign(field_read(213u, 10u), 10u);
+        uint32_t barcode = field_read(DATA_FORMATS_BARCODE_EVENT_OFFSET,
+                                       DATA_FORMATS_BARCODE_EVENT_BITS);
+        int code = (0u != (barcode & DATA_FORMATS_BARCODE_VALID))
+                       ? (int)(barcode & 3u)
+                       : -1;
+        int speed_l = (int)data_formats_unsign(field_read(201u, 10u), 10u);
+        int speed_r = (int)data_formats_unsign(field_read(211u, 10u), 10u);
         tm_printf(
             (UB *)"LINE: ir=%u,%u,%u err=%d state=%u nav=%u "
                   "see=%d lost=%d bc=%d f=0x%03x\n",
-            (unsigned)field_read(49u, 12u), (unsigned)field_read(61u, 12u),
-            (unsigned)field_read(73u, 12u), (int)field_read(121u, 8u) - 127,
-            (unsigned)field_read(129u, 3u), (unsigned)field_read(2u, 3u),
+            (unsigned)field_read(47u, 12u), (unsigned)field_read(59u, 12u),
+            (unsigned)field_read(71u, 12u), (int)field_read(119u, 8u) - 127,
+            (unsigned)field_read(127u, 3u), (unsigned)field_read(0u, 3u),
             b_visible ? 1 : 0, b_lost ? 1 : 0, code,
-            (unsigned)field_read(37u, 12u));
+            (unsigned)field_read(35u, 12u));
 
         if (MOTION_IDLE != mode)
         {
             tm_printf((UB *)"MOVE: mode=%u speed mm/s L=%d R=%d "
                             "enc L=%u R=%u\n",
                       (unsigned)mode, speed_l, speed_r,
-                      (unsigned)field_read(139u, 32u),
-                      (unsigned)field_read(171u, 32u));
+                      (unsigned)field_read(137u, 32u),
+                      (unsigned)field_read(169u, 32u));
         }
     }
 }
@@ -1569,7 +1765,6 @@ static void bench_init(bench_t * p_bench)
 {
     p_bench->state        = 0u;
     p_bench->stage        = 0u;
-    p_bench->look         = 0u;
     p_bench->faults       = 0u;
     p_bench->b_avoided    = false;
     p_bench->report_at_ms = board_io_time_ms();
@@ -1613,17 +1808,15 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
     {
         tm_printf((UB *)"OBSTACLE TEST: %s stage=%u range=%u cm scan=%u\n",
                   (UB *)g_names[state & 7u], (unsigned)stage,
-                  (unsigned)field_read(103u, 9u),
-                  (unsigned)field_read(132u, 3u));
+                  (unsigned)field_read(101u, 9u),
+                  (unsigned)field_read(130u, 3u));
         if ((DATA_FORMATS_AVOID == state) && (1u == stage))
         {
             tm_printf((UB *)"PLAN: width=%u mm offset=%u mm forward=%u mm "
-                            "left=%u cm right=%u cm choose=%s\n",
-                      (unsigned)p_navigation->width_mm,
+                            "choose=%s\n",
+                      (unsigned)p_navigation->measured_width_mm,
                       (unsigned)p_navigation->side_mm,
                       (unsigned)p_navigation->detected_mm,
-                      (unsigned)p_navigation->left_cm,
-                      (unsigned)p_navigation->right_cm,
                       (UB *)(p_navigation->b_left ? "left" : "right"));
         }
     }
@@ -1647,42 +1840,21 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
         tm_printf((UB *)"STATUS: nav=%u motion=%u buttons=%u latched=%u "
                         "line_ready=%u imu_ready=%u reset=%u faults=0x%03x\n",
                   (unsigned)state,
-                  (unsigned)((field_read(5u, 32u) >> 22u) & 7u),
+                  (unsigned)((field_read(3u, 32u) >> 22u) & 7u),
                   (unsigned)board_io_buttons(), b_latched ? 1u : 0u,
                   b_line_ready ? 1u : 0u, b_imu_ready ? 1u : 0u,
-                  b_reset ? 1u : 0u, (unsigned)field_read(37u, 12u));
+                  b_reset ? 1u : 0u, (unsigned)field_read(35u, 12u));
         tm_printf((UB *)"AGES ms: motion=%u line=%u imu=%u nav=%u scan=%u\n",
                   (unsigned)ages[0], (unsigned)ages[1], (unsigned)ages[2],
                   (unsigned)ages[3], (unsigned)ages[4]);
     }
 
-    if ((uint8_t)p_navigation->look != p_bench->look)
-    {
-        tm_printf((UB *)"OBSTACLE TEST: look=%u left=%u cm right=%u cm\n",
-                  (unsigned)p_navigation->look,
-                  (unsigned)p_navigation->left_cm,
-                  (unsigned)p_navigation->right_cm);
-        if (p_navigation->b_body_scan)
-        {
-            tm_printf((UB *)"BODY SCAN: phase=%u point=%u range=%u cm\n",
-                      (unsigned)p_navigation->look,
-                      (unsigned)p_navigation->body_index,
-                      (unsigned)field_read(103u, 9u));
-        }
-        p_bench->look = (uint8_t)p_navigation->look;
-    }
-
-    uint16_t faults = (uint16_t)field_read(37u, 12u);
+    uint16_t faults = (uint16_t)field_read(35u, 12u);
 
     if (faults != p_bench->faults)
     {
         tm_printf((UB *)"OBSTACLE TEST: faults=0x%03x range=%u cm\n",
-                  (unsigned)faults, (unsigned)field_read(103u, 9u));
-        if (0u != p_navigation->scan_failure)
-        {
-            tm_printf((UB *)"BODY SCAN: failed: %s\n",
-                      (UB *)obstacle_reason_name(p_navigation->scan_failure));
-        }
+                  (unsigned)faults, (unsigned)field_read(101u, 9u));
         p_bench->faults = faults;
     }
 
@@ -1706,7 +1878,7 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
 static void bench_look(const navigation_t * p_navigation, uint8_t before,
                        uint8_t after)
 {
-    unsigned range = (unsigned)field_read(103u, 9u);
+    unsigned range = (unsigned)field_read(101u, 9u);
 
     if ((4u == before) && (4u != after))
     {
@@ -1740,7 +1912,7 @@ static void bench_encoders(const navigation_t * p_navigation,
                            bench_t *            p_bench)
 {
     bench_look(p_navigation, p_bench->stage, (uint8_t)p_navigation->stage);
-    uint32_t snapshot    = field_read(5u, 32u);
+    uint32_t snapshot    = field_read(3u, 32u);
     uint8_t  mode        = (uint8_t)((snapshot >> 22u) & 7u);
     bool     b_manoeuvre = (MOTION_MOVE == mode) || (MOTION_TURN == mode);
     uint32_t now         = board_io_time_ms();
@@ -1833,7 +2005,7 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     bool     b_reset      = g_shared.b_reset_scan;
     g_shared.b_reset_scan = false;
     board_io_unlock(mask);
-    uint32_t motion_mode = (field_read(5u, 32u) >> 22u) & 7u;
+    uint32_t motion_mode = (field_read(3u, 32u) >> 22u) & 7u;
 
     if (b_reset)
     {
@@ -1850,11 +2022,10 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
         board_io_unlock(mask);
     }
 
-    uint32_t vehicle = field_read(2u, 3u);
+    uint32_t vehicle = field_read(0u, 3u);
 
     if ((DATA_FORMATS_AVOID == vehicle) && (MOTION_IDLE != motion_mode) &&
-        ((OBSTACLE_PLAN == p_obstacle->state) ||
-         (OBSTACLE_BODY_SCAN == p_obstacle->state)))
+        (OBSTACLE_PLAN == p_obstacle->state))
     {
         p_obstacle->state = OBSTACLE_BYPASS;
     }
@@ -1891,11 +2062,6 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     bool     b_forward      = (30u == measured_angle);
     uint32_t previous_state = p_obstacle->state;
     obstacle_sample(p_obstacle, range, true);
-#if (OBSTACLE_TEST || TM_MQTT)
-    tm_printf((UB *)"RANGE: %u cm echoes=%u angle=%u raw=%u,%u,%u\n",
-              (unsigned)range, (unsigned)echoes, (unsigned)measured_angle,
-              (unsigned)ranges[0], (unsigned)ranges[1], (unsigned)ranges[2]);
-#endif /* OBSTACLE_TEST || TM_MQTT */
     /* One scan cycle is bounded below 500 ms and fits uint16_t. */
     obstacle_tick(p_obstacle, (uint16_t)(board_io_time_ms() - start + 100u));
     if ((OBSTACLE_COARSE == previous_state) &&
@@ -1906,13 +2072,14 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     uint32_t state  = p_obstacle->state;
     mask            = board_io_lock();
     g_scan_width_mm = p_obstacle->width_mm;
+    g_b_scan_width_one_edge = p_obstacle->b_width_one_edge;
     g_scan_side_mm  = p_obstacle->side_mm;
     board_io_unlock(mask);
-    field_write(103u, 9u, b_forward ? range : 0u);
-    field_write(112u, 6u,
+    field_write(101u, 9u, b_forward ? range : 0u);
+    field_write(110u, 6u,
                 (OBSTACLE_PLAN == state) ? p_obstacle->best_angle
                                          : p_obstacle->angle);
-    field_write(132u, 3u, state);
+    field_write(130u, 3u, state);
     /* The close stop guards driving into things. Turning in place and
      * standing still to look do not advance, and a look beside the box
      * naturally puts the nose near it, so only moves and following count. */

@@ -42,6 +42,8 @@
 #define SIM_COS_10 985
 #define SIM_SIN_30 500
 #define SIM_COS_30 866
+#define SIM_SIN_45 707
+#define SIM_COS_45 707
 #define SIM_FLAT_COS 1000
 #define SIM_LCG_A 1103515245u
 #define SIM_LCG_C 12345u
@@ -63,6 +65,8 @@ typedef struct
     int32_t   lean_milli;       /* sin(lean) x 1000, + = left side up */
     int32_t   left_offset_mg;   /* chip zero-g offset on the left axis */
     int32_t   step_ms;          /* time per step */
+    int32_t   vertical_mg;      /* extra up-axis reading: a lift or landing */
+    uint32_t  lifted_steps;     /* steps that terrain_lifted() was true */
     bool      b_stale;
     bool      b_imu_fail;
     uint32_t  starts;
@@ -73,36 +77,40 @@ typedef struct
     bool      b_last_valid;
 } sim_t;
 
-static void    sim_init(sim_t * p_sim, int32_t start_mm);
-static int32_t sim_noise(sim_t * p_sim);
-static void    sim_step(sim_t * p_sim, int32_t target_speed, int32_t sine,
-                        int32_t cosine);
-static void    sim_drive(sim_t * p_sim, int32_t distance_mm, int32_t speed,
+static void     sim_init(sim_t * p_sim, int32_t start_mm);
+static int32_t  sim_noise(sim_t * p_sim);
+static void     sim_step(sim_t * p_sim, int32_t target_speed, int32_t sine,
+                         int32_t cosine);
+static void     sim_drive(sim_t * p_sim, int32_t distance_mm, int32_t speed,
+                          int32_t sine, int32_t cosine);
+static void     sim_wait(sim_t * p_sim, uint32_t steps, int32_t speed,
                          int32_t sine, int32_t cosine);
-static void    sim_wait(sim_t * p_sim, uint32_t steps, int32_t speed,
-                        int32_t sine, int32_t cosine);
-static void    sim_calibrate(sim_t * p_sim);
-static void    sim_hump(sim_t * p_sim, int32_t speed, int32_t sine,
-                        int32_t cosine, int32_t slope_mm);
-static void    test_helpers(void);
-static void    test_calibration(void);
-static void    test_ramp(void);
-static void    test_acceleration(void);
-static void    test_noise(void);
-static void    test_spike_and_timeout(void);
-static void    test_motion_gaps(void);
-static void    test_reverse(void);
-static void    test_saturation(void);
-static void    test_sensor_fault(void);
-static void    test_impact(void);
-static void    test_classification(void);
-static void    sim_side_hump(sim_t * p_sim, int32_t speed, int32_t top_milli,
-                             int32_t up_mm, int32_t flat_mm);
-static void    test_side_hump(void);
-static void    test_side_real_ramp(void);
-static void    test_side_rejects(void);
-static void    test_side_turns(void);
-static void    test_side_faults(void);
+static void     sim_calibrate(sim_t * p_sim);
+static void     sim_hump(sim_t * p_sim, int32_t speed, int32_t sine,
+                         int32_t cosine, int32_t slope_mm);
+static void     test_helpers(void);
+static void     test_calibration(void);
+static void     test_ramp(void);
+static void     test_acceleration(void);
+static void     test_noise(void);
+static void     test_spike_and_timeout(void);
+static void     test_motion_gaps(void);
+static void     test_reverse(void);
+static void     test_saturation(void);
+static void     test_sensor_fault(void);
+static void     test_impact(void);
+static void     test_classification(void);
+static void     sim_side_hump(sim_t * p_sim, int32_t speed, int32_t top_milli,
+                              int32_t up_mm, int32_t flat_mm);
+static void     test_side_hump(void);
+static void     test_side_real_ramp(void);
+static void     test_side_rejects(void);
+static void     test_side_turns(void);
+static void     test_side_faults(void);
+static void     test_line_guard(void);
+static uint32_t sim_lift(sim_t * p_sim, int32_t push_mg, uint32_t push_steps);
+static void     test_lift_ignored(void);
+static void     test_lift(void);
 
 /** @brief Each group prints one line so the log doubles as evidence. */
 void terrain_test_run(void)
@@ -124,6 +132,9 @@ void terrain_test_run(void)
     test_side_rejects();
     test_side_turns();
     test_side_faults();
+    test_line_guard();
+    test_lift_ignored();
+    test_lift();
     (void)puts("PASS: terrain (all groups)");
 }
 
@@ -190,7 +201,7 @@ static void sim_step(sim_t * p_sim, int32_t target_speed, int32_t sine,
     int32_t turning_mg = (turning_mm_s2 * 1000) / SIM_GRAVITY_MM_S2;
     int32_t left = p_sim->lean_milli + turning_mg + p_sim->left_offset_mg +
                    sim_noise(p_sim);
-    int32_t up = cosine + sim_noise(p_sim);
+    int32_t up = cosine + p_sim->vertical_mg + sim_noise(p_sim);
     input.accel_mg[TERRAIN_AXIS_FORWARD] =
         (int16_t)(TERRAIN_SIGN_FORWARD * forward);
     input.accel_mg[TERRAIN_AXIS_LEFT] = (int16_t)(TERRAIN_SIGN_LEFT * left);
@@ -201,9 +212,11 @@ static void sim_step(sim_t * p_sim, int32_t target_speed, int32_t sine,
     input.distance_mm                 = (uint32_t)wrapped;
     input.b_imu_ok                    = !p_sim->b_imu_fail;
     input.b_motion_fresh              = !p_sim->b_stale;
+    input.period_ms                   = (uint8_t)p_sim->step_ms;
     p_sim->spike_forward_mg           = 0;
 
     terrain_step(&p_sim->terrain, &input);
+    p_sim->lifted_steps += terrain_lifted(&p_sim->terrain) ? 1u : 0u;
 
     if (p_sim->terrain.b_started)
     {
@@ -1087,6 +1100,241 @@ static void test_side_faults(void)
     (void)printf("TERRAIN: fault, 10-s stuck and impact during a lean -> "
                  "invalid, best peak stays %u mm; 2 g ramp jolt ignored\n",
                  (unsigned)best);
+}
+
+/** @brief The line guard: on while a wheel climbs, off a moment after, and
+ * not set off by a flat floor at the noise measured on the car.
+ */
+static void test_line_guard(void)
+{
+    sim_t sim = {0};
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    assert(!terrain_line_guard(&sim.terrain));
+    sim_wait(&sim, 50u, 50, 0, SIM_FLAT_COS);
+    assert(!terrain_line_guard(&sim.terrain));
+
+    /* Climb: the guard must be on before the hump is confirmed. */
+    bool    b_guard_first = false;
+    int64_t start         = sim.position_um;
+    int64_t goal          = (int64_t)SIM_RAMP_UP_MM * SIM_UM_PER_MM;
+    int64_t guard_at_um   = -1;
+    int64_t hump_at_um    = -1;
+
+    while ((sim.position_um - start) < goal)
+    {
+        sim.lean_milli =
+            (int32_t)((SIM_RAMP_LEAN * (sim.position_um - start)) / goal);
+        sim_step(&sim, 50, 0, SIM_FLAT_COS);
+        if ((guard_at_um < 0) && (terrain_line_guard(&sim.terrain)))
+        {
+            guard_at_um = sim.position_um - start;
+        }
+        if ((hump_at_um < 0) && (sim.terrain.b_on_hump))
+        {
+            hump_at_um = sim.position_um - start;
+        }
+    }
+
+    b_guard_first = (guard_at_um >= 0) &&
+                    ((hump_at_um < 0) || (guard_at_um <= hump_at_um));
+    assert(b_guard_first);
+    sim.lean_milli = 0;
+    sim_wait(&sim, 200u, 50, 0, SIM_FLAT_COS);
+    assert(!terrain_line_guard(&sim.terrain));
+
+    /* Flat floor, measured noise, 60 s: count steps with the guard on. */
+    uint32_t guarded = 0u;
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim.noise_mg = 100;
+
+    for (uint32_t step = 0u; step < 3000u; ++step)
+    {
+        sim_step(&sim, 50, 0, SIM_FLAT_COS);
+        guarded += terrain_line_guard(&sim.terrain) ? 1u : 0u;
+    }
+
+    assert(guarded < 150u); /* under 5% of the time */
+
+    /* Curves on the flat with the ramp log's noise, both ways, 30 s each. */
+    uint32_t curved = 0u;
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim.noise_mg = 60;
+
+    for (uint32_t step = 0u; step < 3000u; ++step)
+    {
+        sim.turn_mm_s = (step < 1500u) ? 25 : -25;
+        sim_step(&sim, 50, 0, SIM_FLAT_COS);
+        curved += terrain_line_guard(&sim.terrain) ? 1u : 0u;
+    }
+
+    assert(curved < 150u);
+
+    /* Ramp under the right wheel: the guard records "right side up", so the
+     * car steers back right afterwards. */
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim_side_hump(&sim, 50, -SIM_RAMP_LEAN, SIM_RAMP_UP_MM, 0);
+    assert(!terrain_guard_left_up(&sim.terrain));
+    sim_side_hump(&sim, 50, SIM_RAMP_LEAN, SIM_RAMP_UP_MM, 0);
+    assert(terrain_guard_left_up(&sim.terrain));
+    (void)printf("TERRAIN: line guard on at %d mm into the ramp (hump "
+                 "confirmed at %d mm), off after; flat with noise: on %u of "
+                 "3000 steps; curves: on %u of 3000\n",
+                 (int)(guard_at_um / SIM_UM_PER_MM),
+                 (int)(hump_at_um / SIM_UM_PER_MM), (unsigned)guarded,
+                 (unsigned)curved);
+}
+
+/** @brief A lift: push_mg up for push_steps, then the same down to stop.
+ * Returns the time from the start of the lift until terrain_lifted(), or 0.
+ */
+static uint32_t sim_lift(sim_t * p_sim, int32_t push_mg, uint32_t push_steps)
+{
+    uint32_t caught_ms = 0u;
+
+    for (uint32_t step = 0u; step < (2u * push_steps); ++step)
+    {
+        p_sim->vertical_mg = (step < push_steps) ? push_mg : -push_mg;
+        sim_step(p_sim, 50, 0, SIM_FLAT_COS);
+
+        if ((0u == caught_ms) && (terrain_lifted(&p_sim->terrain)))
+        {
+            caught_ms = (step + 1u) * (uint32_t)p_sim->step_ms;
+        }
+    }
+
+    p_sim->vertical_mg = 0;
+    return caught_ms;
+}
+
+/** @brief Not picked up: ramps, floor noise and wheel landings. 20-ms step.
+ */
+static void test_lift_ignored(void)
+{
+    sim_t sim = {0};
+
+    /* 1. Five one-wheel ramp runs with the ramp log's noise, each ending
+     * with the wheel dropping off: 40 ms of free fall, then a hard landing. */
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim.noise_mg = 60;
+
+    for (uint32_t run = 0u; run < 5u; ++run)
+    {
+        sim_side_hump(&sim, 50, SIM_RAMP_LEAN, SIM_RAMP_UP_MM, 0);
+        sim.vertical_mg = -1000;
+        sim_wait(&sim, 2u, 50, 0, SIM_FLAT_COS);
+        sim.vertical_mg = 1500;
+        sim_wait(&sim, 1u, 50, 0, SIM_FLAT_COS);
+        sim.vertical_mg = 0;
+        sim_wait(&sim, 50u, 50, 0, SIM_FLAT_COS);
+    }
+
+    assert(0u == sim.lifted_steps);
+    uint32_t ramp_humps = sim.side_starts;
+
+    /* 2. One hard jolt with no fall before it, then 60 s of noisy floor. */
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim.vertical_mg = 1500;
+    sim_wait(&sim, 1u, 50, 0, SIM_FLAT_COS);
+    sim.vertical_mg = 0;
+    sim.noise_mg    = 100;
+    sim_wait(&sim, 3000u, 50, 0, SIM_FLAT_COS);
+    assert(0u == sim.lifted_steps);
+    (void)printf("TERRAIN: never lifted on 5 ramp runs with landings (%u "
+                 "humps found), one hard jolt, or 60 s of noisy floor\n",
+                 (unsigned)ramp_humps);
+}
+
+/** @brief Picked up: caught from the push of a lift or from a big tilt; ends
+ * only once level and still; and a lift is never reported as a hump.
+ */
+static void test_lift(void)
+{
+    sim_t sim = {0};
+
+    /* 3. Picked up while driving: 0.3 g up for 200 ms, then 0.3 g down for
+     * 200 ms (about 12 cm), then held in a shaking hand for 2 s. */
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim.noise_mg = 20;
+    sim_wait(&sim, 50u, 50, 0, SIM_FLAT_COS);
+    uint32_t normal_ms = sim_lift(&sim, 300, 10u);
+    assert(normal_ms > 0u);
+    sim.noise_mg = 80;
+    sim_wait(&sim, 100u, 0, 0, SIM_FLAT_COS);
+    assert(terrain_lifted(&sim.terrain));
+
+    /* 4. Put down: a landing, then still on the floor. Lifted ends after
+     * TERRAIN_SETTLE_MS of that, not before. */
+    sim.noise_mg    = 5;
+    sim.vertical_mg = 800;
+    sim_wait(&sim, 1u, 0, 0, SIM_FLAT_COS);
+    sim.vertical_mg  = 0;
+    uint32_t down_ms = 0u;
+
+    while ((terrain_lifted(&sim.terrain)) && (down_ms < 2000u))
+    {
+        sim_step(&sim, 0, 0, SIM_FLAT_COS);
+        down_ms += (uint32_t)sim.step_ms;
+    }
+
+    assert(!terrain_lifted(&sim.terrain));
+    assert(down_ms >= TERRAIN_SETTLE_MS);
+    assert(down_ms <= (TERRAIN_SETTLE_MS + 100u));
+    assert(0u == sim.starts); /* the lift was never taken for a hump */
+
+    /* 5. A gentle lift: 0.1 g up for 400 ms. */
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim.noise_mg = 20;
+    sim_wait(&sim, 50u, 50, 0, SIM_FLAT_COS);
+    uint32_t gentle_ms = sim_lift(&sim, 100, 20u);
+    assert(gentle_ms > 0u);
+
+    /* 6. Lifted by one side with no push: tilting to 45 deg over 0.5 s while
+     * the wheels still turn. The tilt catches it; no valid hump is left. */
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim.noise_mg = 20;
+    sim_wait(&sim, 50u, 50, 0, SIM_FLAT_COS);
+    uint32_t tip_ms = 0u;
+
+    for (uint32_t step = 0u; step < 40u; ++step)
+    {
+        int32_t part   = (step < 25u) ? (int32_t)step : 25;
+        sim.lean_milli = (SIM_SIN_45 * part) / 25;
+        int32_t up =
+            SIM_FLAT_COS - (((SIM_FLAT_COS - SIM_COS_45) * part) / 25);
+        sim_step(&sim, 50, 0, up);
+
+        if ((0u == tip_ms) && (terrain_lifted(&sim.terrain)))
+        {
+            tip_ms = (step + 1u) * (uint32_t)sim.step_ms;
+        }
+    }
+
+    assert(tip_ms > 0u);
+    assert(!sim.terrain.b_on_hump);
+    assert(!sim.terrain.b_peak_valid);
+    (void)printf("TERRAIN: lift caught %u ms into a normal lift, %u ms into a "
+                 "gentle one, %u ms into a tip to 45 deg; ended %u ms after "
+                 "being put down\n",
+                 (unsigned)normal_ms, (unsigned)gentle_ms, (unsigned)tip_ms,
+                 (unsigned)down_ms);
 }
 
 /*** End of file. ***/

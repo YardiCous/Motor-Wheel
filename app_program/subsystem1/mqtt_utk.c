@@ -242,7 +242,7 @@ static void network_tick (void * p_argument)
                                publish_done, NULL);
         }
 
-        uint8_t status = DATA_FORMATS_VERSION | 4u | 8u;
+        uint8_t status = 1u | 2u;
         (void)mqtt_publish(gp_client, TELEMETRY_TOPIC_STATUS, &status, 1u,
                            0u, 0u, publish_done, NULL);
 

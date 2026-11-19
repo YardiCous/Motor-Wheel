@@ -34,42 +34,6 @@
 #if USE_TM_PRINTF
 #include <stdarg.h>
 
-#if TK_SUPPORT_SMP && TM_CONSOLE_USB_CDC
-#include <tk/smp.h>
-
-/*
- * tm_vsprintf() emits one logical call as several tm_putchar()/tm_snd_dat()
- * fragments.  The USB ring lock makes each fragment safe, but without this
- * outer lock two processors can still splice fragments from different calls
- * into one corrupted line.  Static zero initialization is the unlocked
- * representation of T_SPLOCK and is available before the startup banner.
- *
- * The interrupt-preserving form also prevents a normal handler on the same
- * processor from deadlocking against a task it interrupted.  Consequently a
- * tm_printf call is a diagnostic operation, not a hard-real-time operation:
- * local interrupts remain masked until that complete call has been emitted.
- */
-LOCAL T_SPLOCK tm_printf_smp_lock;
-EXPORT volatile UW tm_printf_smp_contentions;
-EXPORT volatile UW tm_printf_smp_calls[TK_MAX_CORE];
-
-LOCAL void tm_printf_lock(UINT *intsts)
-{
-	INT prc = tk_get_prc();
-
-	if(ISpinTryLock(&tm_printf_smp_lock, intsts) != E_OK) {
-		(void)atomic_inc((UW *)&tm_printf_smp_contentions);
-		(void)ISpinLock(&tm_printf_smp_lock, intsts);
-	}
-	if(prc >= 1 && prc <= TK_MAX_CORE) tm_printf_smp_calls[prc - 1]++;
-}
-
-LOCAL void tm_printf_unlock(UINT intsts)
-{
-	(void)ISpinUnlock(&tm_printf_smp_lock, intsts);
-}
-#endif
-
 /* Output function */
 typedef	struct {
 	H	len;		/* Total output length */
@@ -303,69 +267,11 @@ LOCAL	void	tm_vsprintf( OutFn ostr, OutPar *par, const UB *fmt, va_list ap )
 #endif
 }
 
-/*
- *	Output to console
- */
-LOCAL	void	out_cons( UB *str, INT len,  OutPar *par )
-{
-#if	TM_OUTBUF_SZ == 0
-	/* Direct output to console */
-	par->len += len;
-	while (--len >= 0) tm_putchar(*str++);
-#else
-	/* Buffered output to console */
-	if (str == NULL) {	/* Flush */
-		if (par->cnt > 0) {
-			par->bufp[par->cnt] = '\0';
-			tm_putstring(par->bufp);
-			par->cnt = 0;
-		}
-	} else {
-		par->len += len;
-		while (--len >= 0) {
-			if (par->cnt >= TM_OUTBUF_SZ - 1) {
-				par->bufp[par->cnt] = '\0';
-				tm_putstring(par->bufp);
-				par->cnt = 0;
-			}
-			par->bufp[par->cnt++] = *str++;
-		}
-	}
-#endif
-}
-
+/* Serial monitor logging is disabled; keep tm_sprintf for data formatting. */
 EXPORT INT	tm_printf( const UB *format, ... )
 {
-	va_list	ap;
-	INT	result;
-#if TK_SUPPORT_SMP && TM_CONSOLE_USB_CDC
-	UINT	intsts;
-
-	tm_printf_lock(&intsts);
-#endif
-
-#if	TM_OUTBUF_SZ == 0
-	H	len = 0;
-
-	va_start(ap, format);
-	tm_vsprintf(out_cons, (OutPar*)&len, format, ap);
-	va_end(ap);
-	result = len;
-#else
-	UB	obuf[TM_OUTBUF_SZ];
-	OutPar	par;
-
-	par.len = par.cnt = 0;
-	par.bufp = obuf;
-	va_start(ap, format);
-	tm_vsprintf(out_cons, (OutPar*)&par, format, ap);
-	va_end(ap);
-	result = par.len;
-#endif
-#if TK_SUPPORT_SMP && TM_CONSOLE_USB_CDC
-	tm_printf_unlock(intsts);
-#endif
-	return result;
+	(void)format;
+	return 0;
 }
 
 /*

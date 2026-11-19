@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools/dashboard'))
 import telemetry_dashboard as dashboard
 
-VECTOR = bytes.fromhex('e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e')
+VECTOR = bytes.fromhex('fa7ffaf71f090000c0ffa76d05b27c00eaffffffff0500000018a01f')
 TOPICS = {'telemetry': 'robot/telemetry', 'status': 'robot/status', 'ack': 'robot/ack',
           'command': 'robot/command'}
 
@@ -27,7 +27,7 @@ TOPICS = {'telemetry': 'robot/telemetry', 'status': 'robot/status', 'ack': 'robo
 def with_field(packet, offset, width, value):
     word = int.from_bytes(packet, 'little')
     mask = ((1 << width) - 1) << offset
-    return ((word & ~mask) | (value << offset)).to_bytes(28, 'little')
+    return ((word & ~mask) | (value << offset)).to_bytes(len(packet), 'little')
 
 
 class ProtocolTests(unittest.TestCase):
@@ -36,19 +36,68 @@ class ProtocolTests(unittest.TestCase):
             spec = importlib.util.spec_from_file_location('protocol_under_test', ROOT / relative)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
+            self.assertNotIn('version', module.decode(VECTOR))
+            self.assertEqual(module.decode(bytes(28))['vehicle'], 0)
+            legacy = module.decode(VECTOR)
+            self.assertIsNone(legacy['barcode_letter'])
+            self.assertTrue(legacy['barcode_valid'])
+            self.assertEqual(legacy['barcode_command'], 3)
+            with self.subTest(decoder=relative, padding_bit=223):
+                with self.assertRaises(ValueError):
+                    module.decode(with_field(VECTOR, 223, 1, 1))
+            # Bit 221 is "picked up" and bit 222 the hump line guard.
+            self.assertEqual(module.decode(VECTOR)['lifted'], 0)
+            self.assertEqual(module.decode(VECTOR)['line_guard'], 0)
+            for bit, name in ((221, 'lifted'), (222, 'line_guard')):
+                with self.subTest(decoder=relative, flag=name):
+                    values = module.decode(with_field(VECTOR, bit, 1, 1))
+                    self.assertEqual(values[name], 1)
+                    self.assertEqual(values['wheel_right_mm_second'],
+                                     module.decode(VECTOR)['wheel_right_mm_second'])
             for distance in [0, 1, 2, 400]:
                 for obstacle in range(8):
                     with self.subTest(decoder=relative, range_cm=distance, obstacle=obstacle):
-                        packet = with_field(VECTOR, 103, 9, distance)
-                        packet = with_field(packet, 132, 3, obstacle)
+                        packet = with_field(VECTOR, 101, 9, distance)
+                        packet = with_field(packet, 130, 3, obstacle)
                         values = module.decode(packet)
                         self.assertEqual(values['range_cm'], distance)
                         self.assertEqual(values['obstacle_state'], obstacle)
                         self.assertEqual(values['pitch_deg'], -5.0)
-            for offset, width, value in [(103, 9, 401), (121, 8, 255)]:
+            for offset, width, value in [(101, 9, 401), (119, 8, 255)]:
                 with self.subTest(decoder=relative, invalid=value):
                     with self.assertRaises(ValueError):
                         module.decode(with_field(VECTOR, offset, width, value))
+
+            self.assertIsNone(module.decode(bytes(29))['barcode_letter'])
+            for code in range(1, 27):
+                with self.subTest(decoder=relative, barcode=code):
+                    values = module.decode(VECTOR + bytes([code]))
+                    self.assertEqual(values['barcode_letter'], chr(ord('A') + code - 1))
+                    self.assertEqual(values['barcode_command'], legacy['barcode_command'])
+            for packet in [VECTOR + b'\x1b', VECTOR + b'\x20',
+                           with_field(VECTOR + b'\x1a', 223, 1, 1)]:
+                with self.subTest(decoder=relative, invalid_packet=packet.hex()):
+                    with self.assertRaises(ValueError):
+                        module.decode(packet)
+
+            barcode_packet = VECTOR + b'\x06'
+            self.assertIsNone(legacy['obstacle_width_mm'])
+            self.assertIsNone(module.decode(barcode_packet)['obstacle_width_mm'])
+            for width in (0, 1, 134, 1868, 4095):
+                with self.subTest(decoder=relative, width=width):
+                    values = module.decode(barcode_packet + width.to_bytes(2, 'little'))
+                    self.assertEqual(values['obstacle_width_mm'], width or None)
+                    self.assertFalse(values['obstacle_width_one_edge'])
+                    self.assertEqual(values['barcode_letter'], 'F')
+                    self.assertEqual(values['range_cm'], 400)
+            estimate = module.decode(barcode_packet + b'\x86\x10')
+            self.assertEqual(estimate['obstacle_width_mm'], 134)
+            self.assertTrue(estimate['obstacle_width_one_edge'])
+            for packet in (barcode_packet + b'\x00', barcode_packet + b'\x00\x10',
+                           barcode_packet + b'\x86\x20'):
+                with self.subTest(decoder=relative, invalid_width_packet=packet.hex()):
+                    with self.assertRaises(ValueError):
+                        module.decode(packet)
 
 
 def until(predicate, timeout=8):
@@ -90,10 +139,10 @@ class StateTests(unittest.TestCase):
         self.state.ingest(TOPICS['telemetry'], VECTOR)
         self.assertEqual([s['id'] for s in self.state.snapshot(since=1)['samples']], [2])
 
-    def test_near_echo_and_body_scan_keep_dashboard_live(self):
-        near = with_field(VECTOR, 103, 9, 1)
-        body = with_field(near, 132, 3, 7)
-        for packet in [VECTOR, near, body]:
+    def test_near_echo_and_legacy_scan_keep_dashboard_live(self):
+        near = with_field(VECTOR, 101, 9, 1)
+        legacy_scan = with_field(near, 130, 3, 7)
+        for packet in [VECTOR, near, legacy_scan]:
             self.state.ingest(TOPICS['telemetry'], packet)
         snapshot = self.state.snapshot()
         self.assertEqual(snapshot['received'], 3)
@@ -108,10 +157,11 @@ class StateTests(unittest.TestCase):
     def test_invalid_and_retained_packets_do_not_refresh_readings(self):
         self.state.ingest(TOPICS['telemetry'], VECTOR)
         first_time = self.state.snapshot()['latest']['time']
-        for packet in [b'', bytes(28), VECTOR[:-1], VECTOR[:-1] + bytes([VECTOR[-1] | 128])]:
+        for packet in [b'', with_field(VECTOR, 25, 3, 7), VECTOR[:-1],
+                       VECTOR[:-1] + bytes([VECTOR[-1] | 128])]:
             self.state.ingest(TOPICS['telemetry'], packet)
         self.state.ingest(TOPICS['telemetry'], VECTOR, retained=True)
-        self.state.ingest(TOPICS['status'], b'\r', retained=True)
+        self.state.ingest(TOPICS['status'], b'\x03', retained=True)
         snapshot = self.state.snapshot()
         self.assertEqual(snapshot['received'], 1)
         self.assertEqual(snapshot['rejected'], 4)
@@ -131,7 +181,13 @@ class StateTests(unittest.TestCase):
         self.assertEqual(len(self.state.snapshot()['events']), 30)
 
     def test_status_ack_and_invalid_status(self):
-        self.state.ingest(TOPICS['status'], b'\x0d')
+        for value in range(4):
+            self.state.ingest(TOPICS['status'], bytes([value]))
+            status = self.state.snapshot()['status']
+            self.assertEqual(status['wifi'], bool(value & 1))
+            self.assertEqual(status['mqtt'], bool(value & 2))
+            self.assertNotIn('version', status)
+        self.state.ingest(TOPICS['status'], b'\x03')
         self.state.ingest(TOPICS['ack'], bytes([1 | (9 << 2) | 64]))
         snapshot = self.state.snapshot()
         self.assertTrue(snapshot['status']['wifi'])
@@ -139,7 +195,7 @@ class StateTests(unittest.TestCase):
         self.assertEqual(snapshot['ack']['sequence'], 9)
         self.assertEqual(snapshot['ack']['command'], 1)
         self.assertTrue(snapshot['ack']['accepted'])
-        for packet in [b'', b'\x00', b'\xfd', b'\x0d\x00']:
+        for packet in [b'', b'\x04', b'\xfd', b'\x03\x00']:
             self.state.ingest(TOPICS['status'], packet)
         self.state.ingest(TOPICS['ack'], b'\x00\x00')
         self.assertEqual(self.state.snapshot()['rejected'], 5)
@@ -177,7 +233,7 @@ class CommandTests(unittest.TestCase):
         self.state = dashboard.Telemetry(topics=TOPICS)
         self.state.publish_command = self.publish
         self.state.set_connection('connected', 'Test broker')
-        self.state.ingest(TOPICS['telemetry'], with_field(VECTOR, 37, 12, 0))
+        self.state.ingest(TOPICS['telemetry'], with_field(VECTOR, 35, 12, 0))
 
     def publish(self, topic, payload, **options):
         self.sent.append((topic, payload, options))
@@ -255,8 +311,8 @@ class CommandTests(unittest.TestCase):
 
     def test_watchdog_blocks_start_but_not_stop(self):
         self.acknowledge(self.state.send_command('stop'))
-        # faults starts at bit 37; watchdog is bit 7 of that field.
-        self.state.ingest(TOPICS['telemetry'], with_field(VECTOR, 37, 12, 0x080))
+        # faults starts at bit 35; watchdog is bit 7 of that field.
+        self.state.ingest(TOPICS['telemetry'], with_field(VECTOR, 35, 12, 0x080))
         controls = self.state.snapshot()['controls']
         self.assertFalse(controls['can_start'])
         self.assertTrue(controls['can_stop'])
@@ -267,7 +323,7 @@ class CommandTests(unittest.TestCase):
         self.state.send_command('stop')
 
     def test_network_advisories_do_not_block_start(self):
-        self.state.ingest(TOPICS['telemetry'], with_field(VECTOR, 37, 12, 0x810))
+        self.state.ingest(TOPICS['telemetry'], with_field(VECTOR, 35, 12, 0x810))
         self.acknowledge(self.state.send_command('stop'))
         self.assertTrue(self.state.snapshot()['controls']['can_start'])
 
@@ -333,7 +389,13 @@ class HTTPTests(unittest.TestCase):
         try:
             with urlopen(url) as response:
                 self.assertEqual(response.status, 200)
-                self.assertIn(b'Motion over time', response.read())
+                page = response.read()
+                self.assertIn(b'<h2 id="barcode-heading">Barcode</h2>', page)
+                self.assertIn(b'<h2 id="obstacle-heading">Obstacle</h2>', page)
+                for field in ('barcode', 'barcode-action', 'ir-barcode', 'range',
+                              'obstacle-width', 'obstacle', 'servo'):
+                    self.assertEqual(page.count(f'id="{field}"'.encode()), 1)
+                self.assertNotIn(b'<canvas', page)
                 self.assertIn("frame-ancestors 'none'", response.headers['Content-Security-Policy'])
             with urlopen(url + '/api/state') as response:
                 payload = json.load(response)
@@ -362,7 +424,11 @@ class HTTPTests(unittest.TestCase):
                 payload = json.load(response)
                 self.assertTrue(payload['demo'])
                 self.assertGreater(payload['received'], 0)
-                self.assertEqual(payload['latest']['values']['version'], 1)
+                self.assertNotIn('version', payload['latest']['values'])
+                self.assertEqual(payload['latest']['values']['vehicle'], 2)
+                self.assertEqual(payload['latest']['values']['barcode_letter'], 'Z')
+                self.assertEqual(payload['latest']['values']['barcode_command'], 1)
+                self.assertEqual(payload['latest']['values']['obstacle_width_mm'], 220)
         finally:
             process.terminate()
             _, error = process.communicate(timeout=5)
@@ -376,7 +442,7 @@ MQTT_AVAILABLE = importlib.util.find_spec('paho') is not None and shutil.which('
 class MQTTTests(unittest.TestCase):
     def test_subscribe_reject_and_reconnect(self):
         import paho.mqtt.client as mqtt
-        live_packet = with_field(VECTOR, 37, 12, 0)
+        live_packet = with_field(VECTOR, 35, 12, 0) + b'\x06\x4c\x07'
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             port = probe.getsockname()[1]
@@ -451,6 +517,9 @@ class MQTTTests(unittest.TestCase):
             self.assertFalse(state.snapshot()['controls']['can_start'])
             self.assertTrue(state.snapshot()['controls']['can_stop'])
             self.assertEqual(state.snapshot()['latest']['values']['pitch_deg'], -5.0)
+            self.assertEqual(state.snapshot()['latest']['values']['barcode_letter'], 'F')
+            self.assertEqual(state.snapshot()['latest']['values']['barcode_command'], 3)
+            self.assertEqual(state.snapshot()['latest']['values']['obstacle_width_mm'], 1868)
         finally:
             if publisher:
                 publisher.disconnect()

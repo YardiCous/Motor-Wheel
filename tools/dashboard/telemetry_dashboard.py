@@ -18,7 +18,8 @@ from urllib.parse import parse_qs, urlsplit
 import uuid
 import webbrowser
 
-from robot_protocol import FIELDS, decode, encode_command
+from robot_protocol import (BARCODE_PACKET_BYTES, FIELDS, LEGACY_PACKET_BYTES,
+                            PACKET_BYTES, decode, encode_command)
 
 ROOT = Path(__file__).resolve().parents[2]
 HTML = Path(__file__).with_suffix('.html')
@@ -192,11 +193,11 @@ class Telemetry:
                         self.event(f'Fault mask changed to {mask}', 'warning' if mask else 'info')
                     self.history.append(sample)
             elif topic == self.topics.get('status'):
-                if len(payload) != 1 or payload[0] & 0xF0 or payload[0] & 3 != 1:
+                if len(payload) != 1 or payload[0] & 0xFC:
                     raise ValueError('Invalid status packet')
                 with self.lock:
-                    self.status = {'time': time.time(), 'wifi': bool(payload[0] & 4),
-                                   'mqtt': bool(payload[0] & 8), 'version': payload[0] & 3}
+                    self.status = {'time': time.time(), 'wifi': bool(payload[0] & 1),
+                                   'mqtt': bool(payload[0] & 2)}
             elif topic == self.topics.get('ack'):
                 if len(payload) != 1:
                     raise ValueError('Acknowledgement requires one byte')
@@ -316,24 +317,28 @@ def demo_loop(state, stop):
     while not stop.is_set():
         t = time.monotonic() - start
         hump = max(0, math.sin(t / 6))
-        values = dict(version=1, vehicle=2, distance_mm=int(t * 240) % 4096,
+        values = dict(vehicle=2, distance_mm=int(t * 240) % 4096,
                       speed_mm_second=int(240 + 35 * math.sin(t)), reverse=0,
                       motion_mode=1, tick_5ms=int(t * 200) % 128, faults=0,
                       ir_left=int(1100 + 400 * math.sin(t)), ir_centre=3200,
                       ir_right=int(1100 - 400 * math.sin(t)), terrain=2 if hump > .3 else 1,
                       pitch_offset=int(64 + 20 * hump), peak_mm=int(35 * hump),
                       range_cm=int(100 + 40 * math.sin(t / 4)), servo_3deg=30,
-                      barcode_event=6, line_error_offset=int(127 + 24 * math.sin(t)),
+                      barcode_event=5, line_error_offset=int(127 + 24 * math.sin(t)),
                       line_state=1, obstacle_state=0, link=3, on_hump=int(hump > .3),
                       height_valid=1, encoder_left=int(t * 600) % (1 << 32),
                       encoder_right=int(t * 600) % (1 << 32),
                       wheel_left_offset=int(752 + 42 * math.sin(t)),
-                      wheel_right_offset=int(752 + 28 * math.cos(t)))
+                      wheel_right_offset=int(752 + 28 * math.cos(t)),
+                      lifted=0, line_guard=int(hump > .2))
         word, offset = 0, 0
         for name, width in FIELDS:
             word |= values[name] << offset
             offset += width
-        state.ingest(state.topics['telemetry'], word.to_bytes(28, 'little'))
+        # Code 39 Z maps to Right in the firmware's junction table.
+        packet = word.to_bytes(LEGACY_PACKET_BYTES, 'little') + bytes([26])
+        packet += (220).to_bytes(PACKET_BYTES - BARCODE_PACKET_BYTES, 'little')
+        state.ingest(state.topics['telemetry'], packet)
         stop.wait(.25)
 
 

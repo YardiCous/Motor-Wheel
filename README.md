@@ -16,7 +16,7 @@ with its `tinyusb`, `cyw43-driver`, and `lwip` submodules. Set `PICO_SDK_PATH` t
 the SDK directory. No new third-party runtime library is required.
 
 ```sh
-# USB console and radio, autonomous operation without MQTT:
+# USB and radio, autonomous operation without MQTT:
 make -C build_make -j8
 
 # Autonomous operation with binary MQTT telemetry and supervisory commands:
@@ -47,6 +47,12 @@ The two standard builds produce:
 Both include the startup and task-priority fixes. Every build checks that
 robot tasks outrank USB and WiFi services. Hold BOOTSEL while connecting USB
 and copy the selected UF2 onto RPI-RP2.
+
+Serial monitor output is disabled for all builds, including boot messages,
+diagnostics, faults, and bench-test reports. USB and UART console writes are
+discarded; MQTT telemetry remains available. Console-output descriptions below
+and in the test guides document the diagnostic messages but no longer produce
+serial output.
 
 GP0/GP1 belong to ultrasonic ranging: use USB console and `CRASH_REPORT=0`.
 The hardware driver rejects UART-console builds that would claim those pins.
@@ -87,9 +93,9 @@ and encoder-controlled turns; only the IMU is stubbed. After a bypass it
 searches for the line and resumes tracking. A valid forward reading at 30 cm
 or nearer starts avoidance. A batch with no echoes reports 400 cm (out of
 range), without latching a fault or blocking START/RESET. This sensor result
-cannot distinguish open space from a disconnected sensor; check for nonzero
-echo counts with a box ahead before a floor run. The USB `RANGE` messages
-show distance, echo count, angle, and raw samples for diagnosis.
+cannot distinguish open space from a disconnected sensor; check the sensor's
+response with a box ahead before a floor run. Range samples are not printed
+to the USB serial monitor.
 Failed pings also print `ECHO` evidence before capture is cleared: kernel wait
 result, capture state (1 waiting for rise, 2 waiting for fall, 3 complete),
 pulse width in microseconds, cumulative rising/falling edge counts, GP0/GP1
@@ -99,35 +105,28 @@ A completed pulse below the sensor's 2-cm measuring range reports `1 cm`
 as a near-limit indication and triggers the existing close-obstacle stop.
 It is not discarded into the 400-cm no-echo fallback.
 The stopped scan covers -30 to +30 degrees in 3-degree steps. It estimates
-full width from the first clear ray beyond each edge and compares the two
-outer side readings. If that sweep cannot bound the width or establish a
-side route, `scan=7` requests an automatic body-assisted scan. The servo is
-centred, the robot turns left 90 degrees, samples every 15 degrees through
-right 90 degrees, then turns back to its original heading. Rays through
-75 degrees estimate both edges; the 90-degree readings compare actual side
-clearance. Invalid samples, unseen edges, or blocked routes still stop, with
-a specific console reason. Width assumes a roughly flat obstacle face and
-is affected by sensor position, beam spread, and turn calibration.
+width from the first clear ray beyond each edge. When only one edge is visible,
+telemetry reports twice that edge's offset. With neither edge visible, width
+is unavailable. The scan prefers a measured edge with
+clearance and otherwise picks the more open side. Width assumes a roughly
+flat obstacle face and is affected by sensor position and beam spread.
 
-The selected route turns 90 degrees (98 mm calibrated wheel travel), moves
-full width plus 150 mm of clearance, turns back 90 degrees, then moves the
-forward distance recorded when the obstacle was detected. For example, an
-estimated 162-mm box detected at 250 mm produces a 312-mm sideways leg and
-an initial 250-mm forward leg. The robot checks clearance after turning;
+The selected route turns 90 degrees, moves sideways to clear the chosen edge,
+then turns back 90 degrees. The sideways target includes the robot's turning
+radius and a 50-mm margin. The initial forward target is the saved detection
+distance plus the robot's length. The robot checks clearance after turning;
 blocked legs stop. It then checks obstacle depth with bounded extra forward
-moves before returning to the line. `PLAN` console messages report the width,
-sideways offset, saved forward distance, side readings, and selected side.
+moves before returning to the line. The plan records the width, sideways
+offset, saved forward distance, and selected side.
 After each forward leg it turns 90 degrees toward the obstacle and checks.
 If still blocked, it turns 90 degrees back, waits for a fresh forward reading,
 then advances another 140 mm in obstacle-test mode (70 mm/s times 2000 ms).
 This repeats up to the configured retry limit. A clear side check starts a
 200-mm forward margin, followed by another check before returning to the line;
 a blocked margin recheck resumes the retry loop.
-The servo scan has an 8-second deadline. Each body turn and bypass leg has
-its own 10-second limit. Large sideways offsets are split into checked moves
-of at most eight seconds each. `BODY_SCAN=1` forces body-based measurement
-after the initial servo scan; fallback is automatic with the normal command.
-Keep the ultrasonic head aligned forward for body scanning.
+The servo scan has an 8-second deadline. Each bypass turn and leg has a
+10-second limit. Large sideways offsets are split into checked moves of at
+most eight seconds each.
 
 RESET reinitialises the ranging pins and echo capture. The trigger pulse is
 timed directly for 12 microseconds, so it does not depend on a timer ISR.
@@ -213,15 +212,24 @@ use bounded nonblocking queues; they never call lwIP or CYW43 directly.
 
 | Topic | Payload |
 |---|---|
-| `robot/telemetry` | 28 bytes; 223 meaningful bits; 4 Hz |
-| `robot/status` | 1 byte; version2, WiFi1, MQTT1 |
+| `robot/telemetry` | 31 bytes, 241 meaningful bits, 4 Hz |
+| `robot/status` | 1 byte; WiFi at bit 0, MQTT at bit 1; upper six bits zero |
 | `robot/command` | 1 byte; command2, sequence4, reserved2=0 |
 | `robot/ack` | 1 byte; echoed command2/sequence4, accepted1, malformed1 |
+
+Payloads have no version field. Telemetry starts with the three-bit vehicle
+state. Bits 221 and 222 carry the IMU's "picked up" and hump line guard flags.
+Byte 29 carries the last scanned Code 39 letter (0 before a scan, 1–26 for
+A–Z). Bits 116–118 carry its junction action and validity. Bits 232–243 carry
+the estimated obstacle width in millimetres, with 0 indicating unavailable.
+Bit 244 identifies estimates based on one edge.
+The dashboard also accepts earlier 28- and 29-byte packets. Flash the updated
+firmware and restart the dashboard to see the width estimate.
 
 ```sh
 python3 tools/dashboard/robot_protocol.py command stop 0
 python3 tools/dashboard/robot_protocol.py command start 1
-python3 tools/dashboard/robot_protocol.py decode e9ffe9df7f24000000ff9fb615c8f201a8ffffffff1700000060807e
+python3 tools/dashboard/robot_protocol.py decode fa7ffaf71f090000c0ffa76d05b27c00eaffffffff0500000018a01f
 ```
 
 Send commands without MQTT retain. Each new MQTT connection requires a fresh

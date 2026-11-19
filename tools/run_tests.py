@@ -18,7 +18,7 @@ FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Werror", "-Wshadow",
          "-DROBOT_LINE_STRADDLE=0u", "-DROBOT_LINE_FRAMED_BARCODE=1u",
          "-DROBOT_CRUISE_MM_SECOND=500u", "-DROBOT_CAUTIOUS_MM_SECOND=250u",
          "-DROBOT_TURN_MM_SECOND=150u", "-DROBOT_SEARCH_MS=3000u",
-         "-DROBOT_BYPASS_MAX_STEPS=12u"]
+         "-DROBOT_BYPASS_MAX_STEPS=12u", "-DROBOT_SERVO_LEFT_HIGH=0u"]
 
 
 def build(root, executable, sanitize=True, bench=False):
@@ -77,6 +77,10 @@ def build_robot_os(root, executable):
                str(root / "app_program/data_formats.c"),
                str(root / "app_program/subsystem3/scanner.c"),
                str(root / "app_program/subsystem3/code39.c"),
+               str(root / "app_program/subsystem2/motion.c"),
+               str(root / "app_program/subsystem5/junction.c"),
+               str(root / "app_program/subsystem5/navigation.c"),
+               str(root / "app_program/subsystem5/obstacle.c"),
                "-o", str(executable)]
     subprocess.run(command, check=True)
 
@@ -116,15 +120,23 @@ def main():
                     "barcode_command": 3, "barcode_valid": True,
                     "faults": 0x123}
         assert all(decoded[key] == value for key, value in expected.items())
+        barcode_vector = next(line.split()[1] for line in output.splitlines()
+                              if line.startswith("BARCODE_VECTOR "))
+        barcode = decode(bytes.fromhex(barcode_vector))
+        assert barcode["barcode_valid"] and barcode["barcode_letter"] == "Z"
+        assert barcode["barcode_command"] == 1
+        width_vector = next(line.split()[1] for line in output.splitlines()
+                            if line.startswith("WIDTH_VECTOR "))
+        assert decode(bytes.fromhex(width_vector))["obstacle_width_mm"] == 134
         for command in ("stop", "start", "reset", "estop"):
             for sequence in range(16):
                 assert encode_command(command, sequence)[0] < 64
         try:
-            decode(bytes(28))
+            decode(bytes(27) + b"\x80")
         except ValueError:
             pass
         else:
-            raise AssertionError("decoder accepted a zero protocol version")
+            raise AssertionError("decoder accepted nonzero reserved padding")
         print("PASS: Python command encoder and decoder rejection checks")
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -161,7 +161,7 @@ Nonblocking binary command bridge, called by the network owner.
 
 `bool robot_os_telemetry(uint8_t * p_packet);`
 
-Retrieve the latest bounded 28-byte telemetry message.
+Retrieve the latest DATA_FORMATS_TELEMETRY_BYTES wire message.
 
 `void robot_os_network(bool b_wifi, bool b_mqtt);`
 
@@ -409,6 +409,14 @@ Process 12-bit ADC samples and modulo-4096 encoder distance.
 
 Return steering -127..127, with validity stored separately.
 
+`void line_hold(line_t * p_line);`
+
+Drive straight and report no junction, after line_step().
+
+`bool line_recover(line_t * p_line, bool b_steer_left, uint32_t steer);`
+
+Steer gently to one side until a line sensor sees the tape; true once it does. Called after line_step().
+
 ## app_program/subsystem3/scanner.h
 
 `void scanner_init(scanner_t * p_reader);`
@@ -533,6 +541,7 @@ typedef struct
     uint32_t distance_mm : 12;   /* Motion odometer, wraps at 4096 mm */
     bool     b_imu_ok : 1;       /* false: the I2C read failed */
     bool     b_motion_fresh : 1; /* false: Motion data older than 20 ms */
+    uint8_t  period_ms;          /* time since the last step; 0: 10 ms */
 } terrain_input_t;
 
 /** @brief Task-local terrain state. Not shared, so no lock is needed.  * Bounded states, counters and flags are packed into unsigned bit-fields. Signed working values (filters, height) use plain fixed-width integers: BARR-C forbids signed bit-fields, and offset-encoding them would add an add/subtract to every 10-ms step for no RAM saving worth having. /
@@ -548,6 +557,9 @@ typedef struct
     uint32_t phase_ms : 14;       /* time in the current phase, 0..10000 */
     uint32_t hump_ms : 14;        /* time since the hump started, 0..10000 */
     uint32_t gate_ms : 9;         /* landing-gate time left, 0..300 */
+    uint32_t guard_ms : 9;        /* line-guard time left, 0..511 */
+    uint32_t guard_run : 3;       /* samples leaning past the guard level */
+    bool     b_guard_left_up : 1; /* side up in the last guard: left */
     uint32_t impact_run : 2;      /* samples above impact threshold, 0..3 */
     uint32_t pitch_field : 7;     /* telemetry pitch, 0.5 deg, offset 64 */
     uint32_t hump_peak_mm : 8;    /* peak of the last finished hump */
@@ -569,6 +581,11 @@ typedef struct
     bool     b_impact : 1;        /* event this step: impact detected */
     bool     b_motion_changed : 1; /* event this step: motion changed */
     bool     b_request_init : 1;   /* caller must (re)initialise the chip */
+    bool     b_lifted : 1;         /* picked up, until back on the floor */
+    uint32_t lift_tilt_ms : 9;     /* time tilted past the lift angle */
+    uint32_t settle_ms : 10;       /* time level and still while lifted */
+    int32_t  lift_speed_um_s;      /* vertical speed estimate, + = up */
+    int32_t  baseline_up_x256;     /* flat-ground up reading, mg x 256 */
     int16_t  height_cmm;           /* running height of this hump, 0.01 mm */
     int16_t  peak_cmm;             /* highest height of this hump, 0.01 mm */
     int8_t   carry_um;             /* remainder below 0.01 mm, -9..9 um */
@@ -598,6 +615,18 @@ Advance the terrain statechart by one 10-ms sample.
 `bool terrain_ready(const terrain_t * p_terrain);`
 
 True once Safety may stop waiting: calibrated or faulted.
+
+`bool terrain_line_guard(const terrain_t * p_terrain);`
+
+True while a one-wheel hump tilts the line and barcode sensors: from a building lean, through the hump, and a moment after it.
+
+`bool terrain_guard_left_up(const terrain_t * p_terrain);`
+
+Which side was raised during the last guard (true = left), so the car can steer back toward the line on that side afterwards.
+
+`bool terrain_lifted(const terrain_t * p_terrain);`
+
+True from the moment the car is picked up until it has been back on the floor, level and still, for TERRAIN_SETTLE_MS.
 
 `uint32_t terrain_pitch_field(int32_t pitch_cdeg);`
 
@@ -688,21 +717,17 @@ typedef struct
     bool     b_estop : 1;
     uint32_t barcode : 2;
     uint32_t elapsed_ms : 14;
-    uint32_t look : 3;
-    uint32_t left_cm : 9;
-    uint32_t right_cm : 9;
     uint32_t side_mm : 12;
     uint32_t steps : 5;
     bool     b_margin : 1;
-    uint32_t width_mm : 12;
+    uint32_t measured_width_mm : 12; /* Zero if unavailable. */
+    bool b_width_one_edge : 1;
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
     bool b_line_seen : 1;
-    bool b_body_scan : 1;
-    uint32_t body_index : 4;
+    bool b_ir_left : 1;  /* GP26 line sensor sees black */
+    bool b_ir_right : 1; /* GP27 line sensor sees black */
     uint32_t side_remaining_mm : 12;
-    uint16_t body_ranges[OBSTACLE_BODY_POINTS];
-    uint8_t scan_failure;
     uint32_t command;
     /* Last barcode letter, or '$' (JUNCTION_NONE) once used at a junction. */
     junction_t junction;
@@ -726,17 +751,13 @@ Remember a barcode letter for the next junction.
 
 The line sensors reached a junction: use the remembered letter ('$' carries straight on). Returns the JUNCTION_* action taken, or JUNCTION_IGNORED (letter kept) when the robot was not following the line.
 
-`bool navigation_obstacle_plan(navigation_t * p_navigation, uint16_t width_mm, uint16_t left_cm, uint16_t right_cm);`
+`bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm, uint16_t side_mm, bool b_left, bool b_one_edge);`
 
-Accept a bounded width and side clearances for a pending bypass.
+Accept the servo scan's route and any measured width.
 
-`bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm, uint16_t side_mm, bool b_left);`
+`void navigation_line_sensors(navigation_t * p_navigation, bool b_left_black, bool b_right_black);`
 
-Accept the servo scan's chosen side and sideways distance.
-
-`bool navigation_body_scan(navigation_t * p_navigation);`
-
-Request a centred-sensor body sweep for a pending bypass.
+Latest line sensor levels: the line search uses them separately.
 
 `void navigation_step(navigation_t * p_navigation, uint8_t motion_mode, bool b_done, bool b_line_valid, bool b_line_lost, bool b_on_hump, uint16_t range_cm, bool b_range_valid, bool b_scan_ready, bool b_scan_left, bool b_barcode_zone, bool b_safety_latched);`
 
@@ -759,6 +780,7 @@ typedef struct
     bool     b_left : 1;
     bool     b_valid : 1;
     bool     b_ready : 1;
+    bool     b_width_one_edge : 1;
     uint32_t scan_ms : 13;
     uint16_t scan_cm[OBSTACLE_SCAN_POINTS];
     uint16_t width_mm;
@@ -790,10 +812,6 @@ Return an outlier-resistant median without adding readings.
 
 Combine zero to three echoes; no echo reports the maximum range.
 
-`uint16_t obstacle_body_width(const uint16_t * p_ranges);`
-
-Estimate width from body headings -90..90 in 15-degree steps. Returns zero when either edge or the front face cannot be established.
-
 `uint16_t obstacle_side_mm(uint32_t edge_mm);`
 
 Sideways travel that puts the robot clear of an edge this far from its centre: edge + turning radius + the side margin.
@@ -804,7 +822,7 @@ True when lateral free space fits the robot after side travel.
 
 `const char * obstacle_reason_name(uint8_t reason);`
 
-Describe the scan rejection or wider-scan request.
+Describe a scan result or rejection.
 
 ## testing/host/code39_host.h
 

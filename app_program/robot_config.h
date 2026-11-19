@@ -31,6 +31,14 @@
 #define ROBOT_REBOOT_HOLD_MS 3000u
 #define ROBOT_RANGE_POWER_UP_MS 1500u
 #define ROBOT_SERVO_SETTLE_MS 300u
+/* 1: scan servo angles above centre (30) point to the robot's left, the way
+ * a hobby servo usually turns when mounted upright. 0: the opposite. The
+ * team saw the robot turn toward a blocked side (15 Nov), which fits 1.
+ * PROVISIONAL: check with the obstacle test, hand on one side. Host tests
+ * set 0, the layout their expected values were written for. */
+#ifndef ROBOT_SERVO_LEFT_HIGH
+#define ROBOT_SERVO_LEFT_HIGH 1u
+#endif /* ROBOT_SERVO_LEFT_HIGH */
 #define ROBOT_BARCODE_DRIVE_MM 400u
 #define ROBOT_BARCODE_DRIVE_MM_SECOND 50u
 /* Per-sensor black thresholds; each sensor reads white differently. */
@@ -99,8 +107,16 @@
 #define ROBOT_BYPASS_BACK_EXTRA_MM 0u
 #else
 #define ROBOT_NO_LINE 0u
-#define ROBOT_BYPASS_BACK_EXTRA_MM 150u
+/* 19 Nov: drive straight back until a sensor sees the tape; this is only a
+ * safety cap past the expected line (was 150). PROVISIONAL. */
+#define ROBOT_BYPASS_BACK_EXTRA_MM 400u
 #endif /* OBSTACLE_NO_LINE */
+/* Tape seen on the way back: carry on this far (the sensors sit this far
+ * ahead of the wheels, so the wheels end on the tape), then turn along the
+ * line and steer gently until a sensor sees it (as after a hump). */
+#ifndef ROBOT_BYPASS_ALIGN_MM
+#define ROBOT_BYPASS_ALIGN_MM ROBOT_SENSOR_AHEAD_MM
+#endif /* ROBOT_BYPASS_ALIGN_MM */
 #ifndef ROBOT_BYPASS_MAX_STEPS
 #define ROBOT_BYPASS_MAX_STEPS 15u
 #endif /* ROBOT_BYPASS_MAX_STEPS */
@@ -116,6 +132,13 @@
 #endif /* ROBOT_LINE_STRADDLE */
 /* Steering in mode 1: one wheel speeds up and the other slows by this much. */
 #define ROBOT_LINE_STEER_MM_SECOND 50u
+/* After the hump guard ends, the car has drifted away from the raised side
+ * (the tilted sensors steered it). It steers gently back toward the raised
+ * side until a line sensor sees the tape, for at most this long. 19 Nov: the
+ * ramp under the right wheel left the car to the left of the line.
+ * PROVISIONAL: tune on the car. */
+#define ROBOT_HUMP_RECOVER_STEER_MM_SECOND 25u
+#define ROBOT_HUMP_RECOVER_MS 1500u
 #define ROBOT_IMPACT_MG 2500
 #define ROBOT_IMU_CAL_SAMPLES 32u
 #define ROBOT_START_PIN 20u

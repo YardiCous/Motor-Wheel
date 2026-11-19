@@ -108,15 +108,6 @@ endif
 ifeq ($(LINE_TEST),1)
 LINE_TEST_SUFFIX := _linetest
 endif
-# BODY_SCAN=1 forces body measurement after the initial servo sweep.
-# The normal profile automatically uses body scanning when servo edges fail.
-BODY_SCAN ?= 0
-ifneq ($(filter $(BODY_SCAN),0 1),$(BODY_SCAN))
-$(error Unknown BODY_SCAN '$(BODY_SCAN)'; use 0 or 1)
-endif
-ifeq ($(BODY_SCAN),1)
-BODY_SCAN_SUFFIX := _bodyscan
-endif
 # OBSTACLE_TEST=1 defaults to driving straight without the line sensors.
 # OBSTACLE_NO_LINE=0 keeps real line tracking and barcode reading enabled.
 # Only the IMU is stubbed; motors, encoders and ranging remain active.
@@ -198,7 +189,7 @@ endif
 # a live hazard: an SMP=1 build was once flashed in place of an SMP=0 one and
 # only the banner in the log revealed it.
 #
-EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)$(MOTOR_TEST_SUFFIX)$(ENCODER_TEST_SUFFIX)$(OBSTACLE_TEST_SUFFIX)$(LINE_TEST_SUFFIX)$(BARCODE_TEST_SUFFIX)$(BODY_SCAN_SUFFIX)
+EXE_FILE := mtk3pico_smp$(SMP)_$(CONSOLE)$(WIFI_SUFFIX)$(NET_SUFFIX)$(MQTT_SUFFIX)$(CRASH_SUFFIX)$(TEST_SUFFIX)$(MOTOR_TEST_SUFFIX)$(ENCODER_TEST_SUFFIX)$(OBSTACLE_TEST_SUFFIX)$(LINE_TEST_SUFFIX)$(BARCODE_TEST_SUFFIX)
 
 GCC := arm-none-eabi-gcc
 AS := arm-none-eabi-gcc
@@ -258,7 +249,7 @@ ifeq ($(SMP),1)
 CFLAGS  += -DCNF_SMP=1
 ASFLAGS += -DCNF_SMP=1
 endif
-CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST) -DOBSTACLE_TEST=$(OBSTACLE_TEST) -DLINE_TEST=$(LINE_TEST) -DBARCODE_TEST=$(BARCODE_TEST) -DOBSTACLE_NO_LINE=$(OBSTACLE_NO_LINE) -DROBOT_BODY_SCAN=$(BODY_SCAN)u
+CFLAGS  += -DAPP_TEST=$(TEST) -DMOTOR_TEST=$(MOTOR_TEST) -DENCODER_TEST=$(ENCODER_TEST) -DOBSTACLE_TEST=$(OBSTACLE_TEST) -DLINE_TEST=$(LINE_TEST) -DBARCODE_TEST=$(BARCODE_TEST) -DOBSTACLE_NO_LINE=$(OBSTACLE_NO_LINE)
 CFLAGS  += -DTM_CONSOLE_UART=$(CRASH_REPORT)
 ifeq ($(CRASH_REPORT),0)
 CFLAGS  += -DBOARD_UART0_FREE=1
@@ -291,7 +282,7 @@ endif
 # before any recipe executes.
 ################################################################################
 
-PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)-motor$(MOTOR_TEST)-enc$(ENCODER_TEST)-obst$(OBSTACLE_TEST)-noline$(OBSTACLE_NO_LINE)-line$(LINE_TEST)-bar$(BARCODE_TEST)-body$(BODY_SCAN)
+PROFILE_ID := smp$(SMP)-$(CONSOLE)-wifi$(WIFI)-net$(NET)-mqtt$(MQTT)-crash$(CRASH_REPORT)-test$(TEST)-motor$(MOTOR_TEST)-enc$(ENCODER_TEST)-obst$(OBSTACLE_TEST)-noline$(OBSTACLE_NO_LINE)-line$(LINE_TEST)-bar$(BARCODE_TEST)
 PROFILE_FILE := .build_profile
 
 ifneq ($(strip $(shell cat $(PROFILE_FILE) 2>/dev/null)),$(PROFILE_ID))

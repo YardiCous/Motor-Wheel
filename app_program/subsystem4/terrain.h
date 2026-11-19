@@ -53,6 +53,7 @@ typedef struct
     uint32_t distance_mm : 12;   /* Motion odometer, wraps at 4096 mm */
     bool     b_imu_ok : 1;       /* false: the I2C read failed */
     bool     b_motion_fresh : 1; /* false: Motion data older than 20 ms */
+    uint8_t  period_ms;          /* time since the last step; 0: 10 ms */
 } terrain_input_t;
 
 /** @brief Task-local terrain state. Not shared, so no lock is needed.
@@ -74,6 +75,9 @@ typedef struct
     uint32_t phase_ms : 14;       /* time in the current phase, 0..10000 */
     uint32_t hump_ms : 14;        /* time since the hump started, 0..10000 */
     uint32_t gate_ms : 9;         /* landing-gate time left, 0..300 */
+    uint32_t guard_ms : 9;        /* line-guard time left, 0..511 */
+    uint32_t guard_run : 3;       /* samples leaning past the guard level */
+    bool     b_guard_left_up : 1; /* side up in the last guard: left */
     uint32_t impact_run : 2;      /* samples above impact threshold, 0..3 */
     uint32_t pitch_field : 7;     /* telemetry pitch, 0.5 deg, offset 64 */
     uint32_t hump_peak_mm : 8;    /* peak of the last finished hump */
@@ -95,6 +99,11 @@ typedef struct
     bool     b_impact : 1;        /* event this step: impact detected */
     bool     b_motion_changed : 1; /* event this step: motion changed */
     bool     b_request_init : 1;   /* caller must (re)initialise the chip */
+    bool     b_lifted : 1;         /* picked up, until back on the floor */
+    uint32_t lift_tilt_ms : 9;     /* time tilted past the lift angle */
+    uint32_t settle_ms : 10;       /* time level and still while lifted */
+    int32_t  lift_speed_um_s;      /* vertical speed estimate, + = up */
+    int32_t  baseline_up_x256;     /* flat-ground up reading, mg x 256 */
     int16_t  height_cmm;           /* running height of this hump, 0.01 mm */
     int16_t  peak_cmm;             /* highest height of this hump, 0.01 mm */
     int8_t   carry_um;             /* remainder below 0.01 mm, -9..9 um */
@@ -121,6 +130,15 @@ void terrain_init(terrain_t * p_terrain);
 void terrain_step(terrain_t * p_terrain, const terrain_input_t * p_input);
 /** @brief True once Safety may stop waiting: calibrated or faulted. */
 bool terrain_ready(const terrain_t * p_terrain);
+/** @brief True while a one-wheel hump tilts the line and barcode sensors:
+ * from a building lean, through the hump, and a moment after it. */
+bool terrain_line_guard(const terrain_t * p_terrain);
+/** @brief Which side was raised during the last guard (true = left), so the
+ * car can steer back toward the line on that side afterwards. */
+bool terrain_guard_left_up(const terrain_t * p_terrain);
+/** @brief True from the moment the car is picked up until it has been back
+ * on the floor, level and still, for TERRAIN_SETTLE_MS. */
+bool terrain_lifted(const terrain_t * p_terrain);
 /** @brief Encode pitch in 0.01 deg as 7 bits: 0.5 deg steps, offset 64.
  * Saturates at -32.0 and +31.5 deg; never wraps.
  */

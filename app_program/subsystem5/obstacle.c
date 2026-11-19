@@ -20,6 +20,7 @@ static const uint16_t g_tangent[11] = {0u,   52u,  105u, 158u, 213u, 268u,
 static const uint16_t g_cosine[11]  = {1000u, 999u, 995u, 988u, 978u, 966u,
                                        951u,  934u, 914u, 891u, 866u};
 
+static uint8_t  side_index(uint8_t offset, bool b_left);
 static void     finish_scan(obstacle_t * p_obstacle);
 static uint16_t edge_offset(const obstacle_t * p_obstacle, bool b_left);
 static uint16_t side_openness(const obstacle_t * p_obstacle, bool b_left);
@@ -88,6 +89,17 @@ void obstacle_sample(obstacle_t * p_obstacle, uint16_t range_cm, bool b_valid)
     }
 }
 
+/** @brief Scan index of the ray this many steps to one side of centre.
+ * Which half of the sweep is the robot's left depends on how the servo is
+ * mounted (ROBOT_SERVO_LEFT_HIGH in robot_config.h).
+ */
+static uint8_t side_index(uint8_t offset, bool b_left)
+{
+    bool b_high = (b_left == (0u != ROBOT_SERVO_LEFT_HIGH));
+    return b_high ? (uint8_t)(OBSTACLE_MIDDLE_INDEX + offset)
+                  : (uint8_t)(OBSTACLE_MIDDLE_INDEX - offset);
+}
+
 /** @brief Locate the first ray beyond each edge of the front-facing object.
  * A ray belongs to the obstacle while its forward projection is close to
  * the centre face. The first clear ray gives a conservative angular bound.
@@ -98,8 +110,7 @@ static uint16_t edge_offset(const obstacle_t * p_obstacle, bool b_left)
 
     for (uint8_t offset = 1u; offset <= OBSTACLE_MIDDLE_INDEX; ++offset)
     {
-        uint8_t  index   = b_left ? (OBSTACLE_MIDDLE_INDEX - offset)
-                                  : (OBSTACLE_MIDDLE_INDEX + offset);
+        uint8_t  index   = side_index(offset, b_left);
         uint32_t range   = p_obstacle->scan_cm[index];
         uint32_t depth   = (range * 10u * g_cosine[offset]) / 1000u;
         bool     b_clear = (ROBOT_RANGE_MAX_CM == range) ||
@@ -124,8 +135,7 @@ static uint16_t side_openness(const obstacle_t * p_obstacle, bool b_left)
     for (uint8_t offset = OBSTACLE_SIDE_FIRST_OFFSET;
          offset <= OBSTACLE_MIDDLE_INDEX; ++offset)
     {
-        uint8_t  index = b_left ? (OBSTACLE_MIDDLE_INDEX - offset)
-                                : (OBSTACLE_MIDDLE_INDEX + offset);
+        uint8_t  index = side_index(offset, b_left);
         uint16_t range = p_obstacle->scan_cm[index];
         best = ((range >= OBSTACLE_SELF_CM) && (range > best)) ? range : best;
     }
@@ -133,13 +143,8 @@ static uint16_t side_openness(const obstacle_t * p_obstacle, bool b_left)
     return best;
 }
 
-/** @brief Plan from whatever edges the servo saw. A seen edge gives an
- * exact sideways distance (edge + half robot + margin), checked against the
- * room its 30-degree ray shows (R x sin 30 = R / 2). The sensor's wide beam
- * hides edges more than ~15 degrees off centre, so an unseen edge is not a
- * reason to stop: that side starts at the edge of the visible face and the
- * bypass steps out further until straight ahead is clear. Seen, roomy sides
- * win; otherwise the more open side is taken.
+/** @brief Prefer a measured edge with room, otherwise choose the more open
+ * side. Navigation checks clearance after the turn and can step out further.
  */
 static void finish_scan(obstacle_t * p_obstacle)
 {
@@ -150,30 +155,42 @@ static void finish_scan(obstacle_t * p_obstacle)
         (uint16_t)((front * 10u * g_tangent[OBSTACLE_MIDDLE_INDEX]) / 1000u);
     p_obstacle->left_cm  = side_openness(p_obstacle, true);
     p_obstacle->right_cm = side_openness(p_obstacle, false);
-    p_obstacle->width_mm = left + right;
     uint16_t need_left   = obstacle_side_mm((0u != left) ? left : visible);
     uint16_t need_right  = obstacle_side_mm((0u != right) ? right : visible);
-    bool     b_left_ok =
-        (0u != left) && (obstacle_room(p_obstacle->left_cm * 5u, need_left));
+    bool b_left_ok = (0u != left) &&
+                     (obstacle_room(p_obstacle->left_cm * 5u, need_left));
     bool b_right_ok = (0u != right) &&
                       (obstacle_room(p_obstacle->right_cm * 5u, need_right));
     bool b_front = (front >= 2u) && ((front * 10u) <= OBSTACLE_FRONT_MAX_MM);
-    bool b_measured = b_left_ok || b_right_ok;
-    bool b_open     = (p_obstacle->left_cm >= p_obstacle->right_cm);
-    p_obstacle->b_left =
-        b_measured
-            ? (b_left_ok && ((!b_right_ok) || (need_left < need_right) ||
-                             ((need_left == need_right) && b_open)))
-            : b_open;
-    p_obstacle->b_ready    = b_front;
-    p_obstacle->side_mm    = p_obstacle->b_left ? need_left : need_right;
-    p_obstacle->best_angle = p_obstacle->b_left ? 20u : 40u;
-    p_obstacle->best_cm =
-        p_obstacle->b_left ? p_obstacle->left_cm : p_obstacle->right_cm;
-    p_obstacle->state = b_front ? OBSTACLE_PLAN : OBSTACLE_ABORT;
-    p_obstacle->reason =
-        b_front ? OBSTACLE_REASON_NONE : OBSTACLE_REASON_NO_FRONT;
+    p_obstacle->b_ready  = b_front;
+    p_obstacle->b_width_one_edge = b_front && ((0u == left) != (0u == right));
+    uint16_t width = left + right;
+    width = p_obstacle->b_width_one_edge ? (uint16_t)(2u * width) : width;
+    p_obstacle->width_mm = b_front ? width : 0u;
     p_obstacle->angle = OBSTACLE_CENTRE;
+
+    if (!b_front)
+    {
+        p_obstacle->state  = OBSTACLE_ABORT;
+        p_obstacle->reason = OBSTACLE_REASON_NO_FRONT;
+    }
+    else
+    {
+        bool b_open     = (p_obstacle->left_cm >= p_obstacle->right_cm);
+        bool b_measured = b_left_ok || b_right_ok;
+        p_obstacle->b_left =
+            b_measured
+                ? (b_left_ok && ((!b_right_ok) || (need_left < need_right) ||
+                                 ((need_left == need_right) && b_open)))
+                : b_open;
+        p_obstacle->side_mm = p_obstacle->b_left ? need_left : need_right;
+        bool b_high = (p_obstacle->b_left == (0u != ROBOT_SERVO_LEFT_HIGH));
+        p_obstacle->best_angle = b_high ? 40u : 20u;
+        p_obstacle->best_cm =
+            p_obstacle->b_left ? p_obstacle->left_cm : p_obstacle->right_cm;
+        p_obstacle->state  = OBSTACLE_PLAN;
+        p_obstacle->reason = OBSTACLE_REASON_NONE;
+    }
 }
 
 /** @brief Edge offset + turning radius + margin, capped at 12 bits: beside
@@ -263,61 +280,14 @@ uint16_t obstacle_range(const uint16_t * p_ranges, uint8_t echoes)
 
     return range;
 }
-/** @brief Wider rays bound edges the limited servo sweep could not see. */
-uint16_t obstacle_body_width(const uint16_t * p_ranges)
-{
-    static const uint16_t cosine[6]  = {1000u, 966u, 866u, 707u, 500u, 259u};
-    static const uint16_t tangent[6] = {0u, 268u, 578u, 1000u, 1733u, 3733u};
-    uint32_t              front      = p_ranges[6] * 10u;
-    uint32_t              edges[2]   = {0u, 0u};
-
-    for (uint8_t index = 0u; index < OBSTACLE_BODY_POINTS; ++index)
-    {
-        if ((p_ranges[index] < 2u) || (p_ranges[index] > ROBOT_RANGE_MAX_CM))
-        {
-            return 0u;
-        }
-    }
-
-    if ((p_ranges[6] < 2u) || (front > OBSTACLE_FRONT_MAX_MM))
-    {
-        return 0u;
-    }
-
-    for (uint8_t side = 0u; side < 2u; ++side)
-    {
-        for (uint8_t offset = 1u; offset < 6u; ++offset)
-        {
-            uint8_t  index   = (0u == side) ? (6u - offset) : (6u + offset);
-            uint32_t range   = p_ranges[index];
-            uint32_t depth   = (range * 10u * cosine[offset]) / 1000u;
-            bool     b_clear = (ROBOT_RANGE_MAX_CM == range) ||
-                               (depth > (front + OBSTACLE_FACE_TOLERANCE_MM));
-
-            if (b_clear)
-            {
-                edges[side] = (front * tangent[offset] + 999u) / 1000u;
-                break;
-            }
-        }
-    }
-
-    return ((0u == edges[0]) || (0u == edges[1]))
-               ? 0u
-               : (uint16_t)(edges[0] + edges[1]);
-}
 
 /** @brief Keep stopped-scan failures distinct in the console. */
 const char * obstacle_reason_name(uint8_t reason)
 {
-    static const char * const names[7] = {"none",
-                                          "wider body scan required",
-                                          "front face not confirmed",
-                                          "both sides blocked",
-                                          "invalid echo samples",
-                                          "scan deadline",
-                                          "obstacle edges not found"};
-    return (reason < 7u) ? names[reason] : "unknown";
+    static const char * const names[] = {
+        "none", "front face not confirmed", "invalid echo samples",
+        "scan deadline"};
+    return (reason <= OBSTACLE_REASON_DEADLINE) ? names[reason] : "unknown";
 }
 
 /*** End of file. ***/

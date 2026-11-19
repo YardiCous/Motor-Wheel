@@ -53,7 +53,7 @@
           <div class="card-head"><h2 id="obstacle-heading">Obstacle</h2></div>
           <dl class="readings">
             <div class="primary"><dt>Forward clearance</dt><dd class="mono" id="range">—</dd></div>
-            <div class="primary"><dt>Estimated width</dt><dd class="mono" id="obstacle-width">—</dd></div>
+            <div class="primary"><dt id="obstacle-width-label">Estimated width</dt><dd class="mono" id="obstacle-width">—</dd></div>
             <div><dt>Routine</dt><dd id="obstacle">—</dd></div>
             <div><dt>Servo angle</dt><dd class="mono" id="servo">—</dd></div>
           </dl>
@@ -140,6 +140,7 @@ function render(s){
     put('encoder-left',v.encoder_left);put('encoder-right',v.encoder_right);
     put('range',v.range_cm>0?`${v.range_cm===1?'<2':fmt(v.range_cm)} cm`:undefined);
     put('obstacle-width',number(v.obstacle_width_mm)?`${fmt(v.obstacle_width_mm)} mm`:undefined);
+    put('obstacle-width-label',v.obstacle_width_one_edge?'Estimated from one edge':'Estimated width');
     put('obstacle',label('obstacle_state',v.obstacle_state));
     put('servo',v.servo_deg===undefined?undefined:`${v.servo_deg}°`);
     put('barcode',v.barcode_valid?v.barcode_letter:undefined);

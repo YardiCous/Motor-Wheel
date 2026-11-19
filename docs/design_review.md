@@ -204,8 +204,9 @@ The servo scans 60°..120° in 3-degree increments (±30° around forward).
 Twenty-one settled points estimate the obstacle edges. A ray counts as beyond
 an edge when its forward projection exceeds the centre face by 50 mm. Width
 is the sum of the two edge offsets, each estimated as centre distance times
-the tangent of the first clear angle. Width is available when the servo sees
-both edges. The plan prefers a measured edge with room, or starts on the more
+the tangent of the first clear angle. If the servo sees one edge, telemetry
+reports twice its offset as a width estimate. The plan prefers a measured
+edge with room, or starts on the more
 open side and checks clearance after turning. The flat-face geometry depends
 on sensor placement and beam spread.
 Each point uses up to three echoes, spaced at least 60 ms; servo changes settle

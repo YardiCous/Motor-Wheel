@@ -22,7 +22,8 @@ BARCODE_PACKET_BYTES = LEGACY_PACKET_BYTES + 1
 PACKET_BYTES = BARCODE_PACKET_BYTES + 2
 BARCODE_LETTER_BITS = 5
 OBSTACLE_WIDTH_BITS = 12
-PAYLOAD_BITS = 223 + BARCODE_LETTER_BITS + OBSTACLE_WIDTH_BITS
+OBSTACLE_WIDTH_ONE_EDGE = 1 << OBSTACLE_WIDTH_BITS
+PAYLOAD_BITS = 224 + BARCODE_LETTER_BITS + OBSTACLE_WIDTH_BITS
 assert sum(width for _, width in FIELDS) == 223
 
 
@@ -36,9 +37,13 @@ def decode(payload: bytes) -> dict[str, int | float | bool | str | None]:
     letter = payload[LEGACY_PACKET_BYTES] if len(payload) >= BARCODE_PACKET_BYTES else 0
     if letter > 26:
         raise ValueError("barcode letter code exceeds its valid range")
-    obstacle_width = int.from_bytes(payload[BARCODE_PACKET_BYTES:], "little")
-    if obstacle_width >> OBSTACLE_WIDTH_BITS:
+    width_field = int.from_bytes(payload[BARCODE_PACKET_BYTES:], "little")
+    if width_field >> (OBSTACLE_WIDTH_BITS + 1):
         raise ValueError("reserved obstacle width bits are set")
+    obstacle_width = width_field & (OBSTACLE_WIDTH_ONE_EDGE - 1)
+    one_edge = bool(width_field & OBSTACLE_WIDTH_ONE_EDGE)
+    if one_edge and not obstacle_width:
+        raise ValueError("one-edge flag requires an obstacle width")
     result = {}
     offset = 0
     for name, width in FIELDS:
@@ -62,6 +67,7 @@ def decode(payload: bytes) -> dict[str, int | float | bool | str | None]:
     result["barcode_command"] = result.pop("barcode_event") & 3
     result["barcode_letter"] = chr(ord("A") + letter - 1) if letter else None
     result["obstacle_width_mm"] = obstacle_width or None
+    result["obstacle_width_one_edge"] = one_edge
     return result
 
 

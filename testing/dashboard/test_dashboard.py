@@ -87,9 +87,14 @@ class ProtocolTests(unittest.TestCase):
                 with self.subTest(decoder=relative, width=width):
                     values = module.decode(barcode_packet + width.to_bytes(2, 'little'))
                     self.assertEqual(values['obstacle_width_mm'], width or None)
+                    self.assertFalse(values['obstacle_width_one_edge'])
                     self.assertEqual(values['barcode_letter'], 'F')
                     self.assertEqual(values['range_cm'], 400)
-            for packet in (barcode_packet + b'\x00', barcode_packet + b'\x00\x10'):
+            estimate = module.decode(barcode_packet + b'\x86\x10')
+            self.assertEqual(estimate['obstacle_width_mm'], 134)
+            self.assertTrue(estimate['obstacle_width_one_edge'])
+            for packet in (barcode_packet + b'\x00', barcode_packet + b'\x00\x10',
+                           barcode_packet + b'\x86\x20'):
                 with self.subTest(decoder=relative, invalid_width_packet=packet.hex()):
                     with self.assertRaises(ValueError):
                         module.decode(packet)

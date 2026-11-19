@@ -12,8 +12,8 @@ are reproducible before/after representation models, not historical logs.
 | Hump event | 12 | 2 | 10 |
 | MQTT command | 8 | 1 | 6 |
 | Supervisory queue entry | 12 | 5 | 38 |
-| Telemetry wire packet | 120 | 31 | 240 |
-| Telemetry queue entry | 124 | 35 | 272 |
+| Telemetry wire packet | 124 | 31 | 241 |
+| Telemetry queue entry | 128 | 35 | 273 |
 | MQTT status | 8 | 1 | 2 |
 | MQTT acknowledgement | 16 | 1 | 8 |
 
@@ -28,9 +28,9 @@ four-byte length header. Control blocks are unchanged and excluded.
 | Barcode | 4 | 32 | 32 |
 | Hump | 4 | 64 | 32 |
 | Supervisory | 8 | 128 | 96 |
-| Telemetry | 1 | 128 | 40 |
+| Telemetry | 1 | 132 | 40 |
 | ACK | 8 | 128 | 64 |
-| Total | | 560 | 296 |
+| Total | | 564 | 296 |
 
 A one-byte barcode message saves wire/application bytes but does not
 reduce this kernel's per-entry allocation compared with a four-byte

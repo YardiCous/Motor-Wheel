@@ -8,7 +8,7 @@ from dashboard.robot_protocol import FIELDS, PACKET_BYTES, PAYLOAD_BITS
 def main():
     # Baseline is an explicit 32-bit encoding per logical field, not an
     # unmeasured historical text payload or compiler-dependent structure.
-    telemetry_fields = len(FIELDS) + 2  # Includes the barcode letter and obstacle width.
+    telemetry_fields = len(FIELDS) + 3  # Barcode letter, width, and one-edge flag.
     telemetry_entry_bytes = PACKET_BYTES + 4
     messages = [
         ("Motion snapshot", 5, 4, 32), ("Motion command", 4, 3, 24),

@@ -108,8 +108,9 @@ well as subscribing to telemetry, status and acknowledgements.
   and the GP28 IR reading. The letter and action stay visible until the next
   scan or firmware reboot.
 - The **Obstacle** panel shows forward clearance, estimated width, routine
-  and servo angle. Width is estimated when the scan sees both edges and stays
-  visible until the next avoidance begins or the robot resets. A dash means
+  and servo angle. **Estimated from one edge** means the scan doubled the
+  offset of the only visible edge. Width stays visible until the next
+  avoidance begins or the robot resets. A dash means
   the reading is unavailable. The robot plans its bypass from the coarse servo
   sweep and checks clearance after turning.
   `0x200` can indicate a blocked route, a failed scan, or an elapsed deadline.

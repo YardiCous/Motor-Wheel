@@ -29,7 +29,8 @@ typedef struct
     uint32_t side_mm : 12;
     uint32_t steps : 5;
     bool     b_margin : 1;
-    uint32_t measured_width_mm : 12; /* Both edges seen. Zero if unavailable. */
+    uint32_t measured_width_mm : 12; /* Zero if unavailable. */
+    bool b_width_one_edge : 1;
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
     bool b_line_seen : 1;
@@ -57,7 +58,7 @@ bool navigation_letter(navigation_t * p_navigation, char letter);
 uint8_t navigation_junction(navigation_t * p_navigation);
 /** @brief Accept the servo scan's route and any measured width. */
 bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm,
-                               uint16_t side_mm, bool b_left);
+                               uint16_t side_mm, bool b_left, bool b_one_edge);
 /** @brief Latest line sensor levels: the line search uses them separately. */
 void navigation_line_sensors(navigation_t * p_navigation, bool b_left_black,
                              bool b_right_black);

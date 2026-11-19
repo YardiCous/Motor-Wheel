@@ -214,6 +214,7 @@ static void verify_obstacle_width_telemetry(void)
     assert(data_formats_read(packet, 130u, 3u) == OBSTACLE_PLAN);
     assert(data_formats_read(packet, 110u, 6u) == scanner.best_angle);
     assert(data_formats_read(packet, 232u, 12u) == 134u);
+    assert(data_formats_read(packet, 244u, 1u) == 0u);
     (void)printf("WIDTH_VECTOR ");
     for (size_t index = 0u; index < sizeof(packet); ++index)
     {
@@ -239,7 +240,7 @@ static void verify_obstacle_width_telemetry(void)
         obstacle_cycle(&scanner, &angle);
     }
     navigation_cycle(&manager);
-    assert(scanner.width_mm == 0u);
+    assert(scanner.width_mm == 134u && scanner.b_width_one_edge);
     assert(manager.stage == 1u);
     assert(!manager.b_fault);
     assert(field_read(130u, 3u) == OBSTACLE_PLAN);
@@ -251,8 +252,9 @@ static void verify_obstacle_width_telemetry(void)
     telemetry_enqueue();
     assert(robot_os_telemetry(packet));
     assert(data_formats_read(packet, 130u, 3u) == OBSTACLE_BYPASS);
-    assert(data_formats_read(packet, 232u, 12u) == 0u);
-    puts("PASS: coarse scan publishes complete widths and plans both cases");
+    assert(data_formats_read(packet, 232u, 12u) == 134u);
+    assert(data_formats_read(packet, 244u, 1u) == 1u);
+    puts("PASS: coarse scan publishes both-edge and flagged one-edge widths");
 }
 
 int main(void)

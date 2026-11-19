@@ -720,7 +720,8 @@ typedef struct
     uint32_t side_mm : 12;
     uint32_t steps : 5;
     bool     b_margin : 1;
-    uint32_t measured_width_mm : 12; /* Both edges seen. Zero if unavailable. */
+    uint32_t measured_width_mm : 12; /* Zero if unavailable. */
+    bool b_width_one_edge : 1;
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
     bool b_line_seen : 1;
@@ -750,7 +751,7 @@ Remember a barcode letter for the next junction.
 
 The line sensors reached a junction: use the remembered letter ('$' carries straight on). Returns the JUNCTION_* action taken, or JUNCTION_IGNORED (letter kept) when the robot was not following the line.
 
-`bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm, uint16_t side_mm, bool b_left);`
+`bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm, uint16_t side_mm, bool b_left, bool b_one_edge);`
 
 Accept the servo scan's route and any measured width.
 
@@ -779,9 +780,10 @@ typedef struct
     bool     b_left : 1;
     bool     b_valid : 1;
     bool     b_ready : 1;
+    bool     b_width_one_edge : 1;
     uint32_t scan_ms : 13;
     uint16_t scan_cm[OBSTACLE_SCAN_POINTS];
-    uint16_t width_mm; /* Full width when both edges are visible. */
+    uint16_t width_mm;
     uint16_t side_mm;
     uint16_t left_cm;
     uint16_t right_cm;

@@ -489,7 +489,7 @@ static void verify_blocked_width_route(void)
     assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
     navigation_step(&manager, MOTION_FOLLOW, false, true, false, false, 25u,
                     true, false, false, false, false);
-    assert(navigation_obstacle_route(&manager, 162u, 311u, true));
+    assert(navigation_obstacle_route(&manager, 162u, 311u, true, false));
     navigation_step(&manager, MOTION_IDLE, false, false, false, false, 400u,
                     true, true, true, false, false);
     verify_settle(&manager);
@@ -575,10 +575,12 @@ static void verify_width_route(void)
             assert(!manager.b_fault);
         }
 
-        assert(!navigation_obstacle_route(&manager, 162u, 0u, b_left));
-        assert(!navigation_obstacle_route(&manager, 5000u, 311u, b_left));
-        assert(!navigation_obstacle_route(&manager, 162u, 5000u, b_left));
-        assert(navigation_obstacle_route(&manager, 162u, 311u, b_left));
+        assert(!navigation_obstacle_route(&manager, 162u, 0u, b_left, false));
+        assert(!navigation_obstacle_route(&manager, 5000u, 311u,
+                                           b_left, false));
+        assert(!navigation_obstacle_route(&manager, 162u, 5000u,
+                                           b_left, false));
+        assert(navigation_obstacle_route(&manager, 162u, 311u, b_left, false));
         assert(b_left == manager.b_left);
         /* A centred 162-mm box: 81 mm edge + 180 turn radius + 50 margin. */
         assert(311u == manager.side_mm);
@@ -622,7 +624,8 @@ static void verify_long_side_move(void)
     uint32_t total = 1500u;
     navigation_init(p_manager);
     p_manager->state = DATA_FORMATS_AVOID;
-    assert(navigation_obstacle_route(p_manager, 134u, (uint16_t)total, true));
+    assert(navigation_obstacle_route(p_manager, 134u, (uint16_t)total,
+                                     true, false));
     navigation_step(p_manager, MOTION_IDLE, false, false, false, false, 400u,
                     true, true, true, false, false);
     uint32_t moved = 0u;
@@ -744,7 +747,7 @@ static void verify_navigation(void)
                     true, false, false, false, false);
     assert(DATA_FORMATS_AVOID == manager.state);
     assert(0u != manager.b_stop_requested);
-    assert(navigation_obstacle_route(&manager, 162u, 311u, true));
+    assert(navigation_obstacle_route(&manager, 162u, 311u, true, false));
     navigation_step(&manager, MOTION_IDLE, false, false, false, false, 100u,
                     true, true, true, false, false);
     assert(1u == manager.stage);
@@ -825,7 +828,7 @@ static void verify_interlocks(void)
     assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
     navigation_step(&manager, MOTION_FOLLOW, false, true, false, false, 25u,
                     true, false, false, false, false);
-    assert(navigation_obstacle_route(&manager, 162u, 311u, false));
+    assert(navigation_obstacle_route(&manager, 162u, 311u, false, false));
     navigation_step(&manager, MOTION_IDLE, false, false, false, false, 100u,
                     true, true, false, false, false);
     verify_bypass_run(&manager, false);

@@ -20,8 +20,8 @@ Navigation regression checks cover both bypass directions, asymmetric edge
 widths, missing edges, all-empty scans, blocked routes, calibrated quarter
 turns, full-width sideways travel, and the saved detection distance.
 
-Coarse-scan checks verify that a hidden edge leaves the width unavailable in
-telemetry and that the bypass can still choose a side. Host tests also cover
+Coarse-scan checks verify that a single visible edge yields a flagged width
+estimate and that the bypass can still choose a side. Host tests also cover
 large offsets split into shorter legs, STOP, and safety preemption.
 
 The host runner also compiles the real `board_io.c` against mocked registers.

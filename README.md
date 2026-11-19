@@ -105,8 +105,9 @@ A completed pulse below the sensor's 2-cm measuring range reports `1 cm`
 as a near-limit indication and triggers the existing close-obstacle stop.
 It is not discarded into the 400-cm no-echo fallback.
 The stopped scan covers -30 to +30 degrees in 3-degree steps. It estimates
-full width from the first clear ray beyond each edge. When an edge is hidden,
-telemetry shows width as unavailable. The scan prefers a measured edge with
+width from the first clear ray beyond each edge. When only one edge is visible,
+telemetry reports twice that edge's offset. With neither edge visible, width
+is unavailable. The scan prefers a measured edge with
 clearance and otherwise picks the more open side. Width assumes a roughly
 flat obstacle face and is affected by sensor position and beam spread.
 
@@ -211,7 +212,7 @@ use bounded nonblocking queues; they never call lwIP or CYW43 directly.
 
 | Topic | Payload |
 |---|---|
-| `robot/telemetry` | 31 bytes, 240 meaningful bits, 4 Hz |
+| `robot/telemetry` | 31 bytes, 241 meaningful bits, 4 Hz |
 | `robot/status` | 1 byte; WiFi at bit 0, MQTT at bit 1; upper six bits zero |
 | `robot/command` | 1 byte; command2, sequence4, reserved2=0 |
 | `robot/ack` | 1 byte; echoed command2/sequence4, accepted1, malformed1 |
@@ -221,6 +222,7 @@ state. Bits 221 and 222 carry the IMU's "picked up" and hump line guard flags.
 Byte 29 carries the last scanned Code 39 letter (0 before a scan, 1–26 for
 A–Z). Bits 116–118 carry its junction action and validity. Bits 232–243 carry
 the estimated obstacle width in millimetres, with 0 indicating unavailable.
+Bit 244 identifies estimates based on one edge.
 The dashboard also accepts earlier 28- and 29-byte packets. Flash the updated
 firmware and restart the dashboard to see the width estimate.
 

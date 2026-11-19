@@ -152,6 +152,7 @@ static ID                gh_telemetry_queue                     = 0;
 static ID                gh_echo_flag                           = 0;
 static ID                gh_ack_queue                           = 0;
 static uint16_t          g_scan_width_mm                        = 0u;
+static bool              g_b_scan_width_one_edge                = false;
 static uint16_t          g_scan_side_mm                         = 0u;
 static ID                gh_cyclic                              = 0;
 
@@ -1447,9 +1448,10 @@ static void navigation_cycle(navigation_t * p_navigation)
         mask           = board_io_lock();
         uint16_t width = g_scan_width_mm;
         uint16_t side  = g_scan_side_mm;
+        bool b_one_edge = g_b_scan_width_one_edge;
         board_io_unlock(mask);
-        bool b_plan =
-            navigation_obstacle_route(p_navigation, width, side, b_scan_left);
+        bool b_plan = navigation_obstacle_route(p_navigation, width, side,
+                                                 b_scan_left, b_one_edge);
         p_navigation->b_fault = (p_navigation->b_fault) || (!b_plan);
     }
 
@@ -1468,9 +1470,12 @@ static void navigation_cycle(navigation_t * p_navigation)
         navigation_init(p_navigation);
     }
 
+    uint32_t width_field = p_navigation->measured_width_mm;
+    width_field |= p_navigation->b_width_one_edge
+                       ? DATA_FORMATS_OBSTACLE_WIDTH_ONE_EDGE
+                       : 0u;
     field_write(DATA_FORMATS_OBSTACLE_WIDTH_OFFSET,
-                DATA_FORMATS_OBSTACLE_WIDTH_BITS,
-                p_navigation->measured_width_mm);
+                DATA_FORMATS_OBSTACLE_WIDTH_BITS + 1u, width_field);
     uint16_t faults = p_navigation->b_fault ? DATA_FORMATS_FAULT_TIMEOUT : 0u;
     faults |= p_navigation->b_estop ? DATA_FORMATS_FAULT_ESTOP : 0u;
     fault_source(ROBOT_SOURCE_NAV, faults);
@@ -2067,6 +2072,7 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     uint32_t state  = p_obstacle->state;
     mask            = board_io_lock();
     g_scan_width_mm = p_obstacle->width_mm;
+    g_b_scan_width_one_edge = p_obstacle->b_width_one_edge;
     g_scan_side_mm  = p_obstacle->side_mm;
     board_io_unlock(mask);
     field_write(101u, 9u, b_forward ? range : 0u);

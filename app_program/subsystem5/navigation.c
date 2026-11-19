@@ -110,6 +110,7 @@ bool navigation_supervise(navigation_t * p_navigation, uint8_t command,
             if (b_accepted)
             {
                 p_navigation->measured_width_mm = 0u;
+                p_navigation->b_width_one_edge   = false;
             }
             break;
 
@@ -287,7 +288,7 @@ static void issue(navigation_t * p_navigation, uint8_t mode, uint16_t distance,
 /** @brief Servo-scan plan: the scanner already chose the side and distance.
  */
 bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm,
-                               uint16_t side_mm, bool b_left)
+                               uint16_t side_mm, bool b_left, bool b_one_edge)
 {
     bool b_valid = (DATA_FORMATS_AVOID == p_navigation->state) &&
                    (BYPASS_CHOOSE == p_navigation->stage) && (0u != side_mm) &&
@@ -297,6 +298,7 @@ bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm,
     if (b_valid)
     {
         p_navigation->measured_width_mm = width_mm;
+        p_navigation->b_width_one_edge   = b_one_edge && (width_mm != 0u);
         p_navigation->side_mm          = side_mm;
         p_navigation->b_left           = b_left;
     }
@@ -649,6 +651,7 @@ static void step_follow(navigation_t * p_navigation, bool b_line_lost,
         p_navigation->b_scan_requested  = true;
         p_navigation->detected_mm       = range_cm * 10u;
         p_navigation->measured_width_mm = 0u;
+        p_navigation->b_width_one_edge   = false;
         p_navigation->side_mm           = 0u;
         p_navigation->stage             = 0u;
         p_navigation->elapsed_ms        = 0u;

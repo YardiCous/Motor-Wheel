@@ -41,7 +41,7 @@ of 372 (268 bytes / 72.04% reduction). These task-local type sizes are separate
 from fixed task-stack reservations, not an extra static-BSS saving.
 
 The six bounded queues require 296 buffer bytes rather than the equivalent wide
-model's 560 bytes. Telemetry on the wire is 31 bytes rather than 120 bytes in the
+model's 564 bytes. Telemetry on the wire is 31 bytes rather than 124 bytes in the
 explicit wide reference. Kernel length headers/alignment are included in the queue
 comparison. No unmeasured historical JSON/text size is claimed.
 

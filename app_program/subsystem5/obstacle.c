@@ -163,9 +163,10 @@ static void finish_scan(obstacle_t * p_obstacle)
                       (obstacle_room(p_obstacle->right_cm * 5u, need_right));
     bool b_front = (front >= 2u) && ((front * 10u) <= OBSTACLE_FRONT_MAX_MM);
     p_obstacle->b_ready  = b_front;
-    p_obstacle->width_mm = (b_front && (0u != left) && (0u != right))
-                              ? (uint16_t)(left + right)
-                              : 0u;
+    p_obstacle->b_width_one_edge = b_front && ((0u == left) != (0u == right));
+    uint16_t width = left + right;
+    width = p_obstacle->b_width_one_edge ? (uint16_t)(2u * width) : width;
+    p_obstacle->width_mm = b_front ? width : 0u;
     p_obstacle->angle = OBSTACLE_CENTRE;
 
     if (!b_front)

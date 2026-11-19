@@ -49,6 +49,9 @@ void line_step(line_t * p_line, const uint16_t * p_samples, uint16_t distance,
 int16_t line_error(const line_t * p_line);
 /** @brief Drive straight and report no junction, after line_step(). */
 void line_hold(line_t * p_line);
+/** @brief Steer gently to one side until a line sensor sees the tape; true
+ * once it does. Called after line_step(). */
+bool line_recover(line_t * p_line, bool b_steer_left, uint32_t steer);
 
 #endif /* LINE_H */
 

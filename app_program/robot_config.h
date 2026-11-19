@@ -124,6 +124,13 @@
 #endif /* ROBOT_LINE_STRADDLE */
 /* Steering in mode 1: one wheel speeds up and the other slows by this much. */
 #define ROBOT_LINE_STEER_MM_SECOND 50u
+/* After the hump guard ends, the car has drifted away from the raised side
+ * (the tilted sensors steered it). It steers gently back toward the raised
+ * side until a line sensor sees the tape, for at most this long. 19 Nov: the
+ * ramp under the right wheel left the car to the left of the line.
+ * PROVISIONAL: tune on the car. */
+#define ROBOT_HUMP_RECOVER_STEER_MM_SECOND 25u
+#define ROBOT_HUMP_RECOVER_MS 1500u
 #define ROBOT_IMPACT_MG 2500
 #define ROBOT_IMU_CAL_SAMPLES 32u
 #define ROBOT_START_PIN 20u

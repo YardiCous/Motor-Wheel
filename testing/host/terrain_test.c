@@ -1158,11 +1158,38 @@ static void test_line_guard(void)
     }
 
     assert(guarded < 150u); /* under 5% of the time */
+
+    /* Curves on the flat with the ramp log's noise, both ways, 30 s each. */
+    uint32_t curved = 0u;
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim.noise_mg = 60;
+
+    for (uint32_t step = 0u; step < 3000u; ++step)
+    {
+        sim.turn_mm_s = (step < 1500u) ? 25 : -25;
+        sim_step(&sim, 50, 0, SIM_FLAT_COS);
+        curved += terrain_line_guard(&sim.terrain) ? 1u : 0u;
+    }
+
+    assert(curved < 150u);
+
+    /* Ramp under the right wheel: the guard records "right side up", so the
+     * car steers back right afterwards. */
+    sim_init(&sim, 0);
+    sim.step_ms = SIM_REAL_STEP_MS;
+    sim_calibrate(&sim);
+    sim_side_hump(&sim, 50, -SIM_RAMP_LEAN, SIM_RAMP_UP_MM, 0);
+    assert(!terrain_guard_left_up(&sim.terrain));
+    sim_side_hump(&sim, 50, SIM_RAMP_LEAN, SIM_RAMP_UP_MM, 0);
+    assert(terrain_guard_left_up(&sim.terrain));
     (void)printf("TERRAIN: line guard on at %d mm into the ramp (hump "
                  "confirmed at %d mm), off after; flat with noise: on %u of "
-                 "3000 steps\n",
+                 "3000 steps; curves: on %u of 3000\n",
                  (int)(guard_at_um / SIM_UM_PER_MM),
-                 (int)(hump_at_um / SIM_UM_PER_MM), (unsigned)guarded);
+                 (int)(hump_at_um / SIM_UM_PER_MM), (unsigned)guarded,
+                 (unsigned)curved);
 }
 
 /** @brief A lift: push_mg up for push_steps, then the same down to stop.

@@ -181,6 +181,24 @@ void line_hold(line_t * p_line)
     }
 }
 
+/** @brief After a hump: while neither line sensor sees the tape, steer
+ * gently toward one side (straddle mode reads "lost" as white/white, the
+ * same as centred, so it would otherwise drive straight on). Called after
+ * line_step(). Returns true once a line sensor sees the tape.
+ */
+bool line_recover(line_t * p_line, bool b_steer_left, uint32_t steer)
+{
+    bool b_found = p_line->b_line_valid;
+
+    if (!b_found)
+    {
+        int32_t error = b_steer_left ? -(int32_t)steer : (int32_t)steer;
+        p_line->error = (uint32_t)(error + 127);
+    }
+
+    return b_found;
+}
+
 /** @brief Offset binary avoids signed shifts in packed application data. */
 int16_t line_error(const line_t * p_line)
 {

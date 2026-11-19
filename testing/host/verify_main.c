@@ -349,6 +349,16 @@ static void verify_line_startup(void)
     assert(LINE_TRACKING == detector.state);
     assert(127u == detector.error);
     assert(0u == detector.junction_ms);
+    /* After a hump: a sensor on the tape ends the steer-back at once, ... */
+    assert(line_recover(&detector, false, 25u));
+    assert(127u == detector.error);
+    /* ... and white/white steers gently to the side asked for. */
+    const uint16_t white[ROBOT_IR_COUNT] = {0u, 0u, 0u};
+    line_step(&detector, white, 0u, false);
+    assert(!line_recover(&detector, false, 25u));
+    assert((127u + 25u) == detector.error);
+    assert(!line_recover(&detector, true, 25u));
+    assert((127u - 25u) == detector.error);
 }
 
 /** @brief Ambiguous bars and reversing cannot generate a command. */

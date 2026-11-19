@@ -80,6 +80,8 @@ typedef struct
     bool     b_line_lost : 1;
     bool     b_line_guard : 1; /* hump tilt: hold the line sensors straight */
     bool     b_lifted : 1;     /* picked up: wheels stop, START waits */
+    uint32_t recover : 2;      /* after a hump: 0 no, 1 steer right, 2 left */
+    uint32_t recover_at_ms;    /* when the post-hump steering began */
     uint32_t reset_at_ms;
 } shared_t;
 
@@ -179,6 +181,7 @@ static void line_cycle(line_t * p_line, scanner_t * p_reader,
 static void line_events(line_t * p_line, scanner_t * p_reader, uint16_t raw,
                         bool b_departure, bool * pb_junction);
 static void line_event(uint8_t event);
+static void line_recovery(line_t * p_line, uint32_t vehicle);
 #endif /* BARCODE_TEST */
 #if OBSTACLE_NO_LINE
 static void line_virtual(void);
@@ -199,6 +202,7 @@ static void bench_look(const navigation_t * p_navigation, uint8_t before,
 #if ((!OBSTACLE_TEST) && (!LINE_TEST))
 static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
                           bool * pb_configured);
+static void terrain_flags(const terrain_t * p_terrain);
 #else
 static void terrain_stub(void);
 #endif /* OBSTACLE_TEST || LINE_TEST */
@@ -1104,6 +1108,10 @@ static void line_cycle(line_t * p_line, scanner_t * p_reader,
          * or barcode until the guard ends. */
         line_hold(p_line);
     }
+    else
+    {
+        line_recovery(p_line, vehicle);
+    }
 
     /* GP28 is the third sample. */
     line_events(p_line, p_reader, samples[2], (b_departure) || (b_guard),
@@ -1161,6 +1169,42 @@ static void line_events(line_t * p_line, scanner_t * p_reader, uint16_t raw,
     if (b_arrived)
     {
         line_event((uint8_t)JUNCTION_EVENT);
+    }
+}
+
+/** @brief After the hump guard: steer gently back toward the raised side
+ * until a line sensor sees the tape, for at most ROBOT_HUMP_RECOVER_MS, and
+ * only while following the line.
+ */
+static void line_recovery(line_t * p_line, uint32_t vehicle)
+{
+    uint32_t mask    = board_io_lock();
+    uint32_t recover = g_shared.recover;
+    uint32_t began   = g_shared.recover_at_ms;
+    board_io_unlock(mask);
+
+    if (0u != recover)
+    {
+        bool b_following = (DATA_FORMATS_FOLLOW == vehicle) ||
+                           (DATA_FORMATS_HUMP == vehicle);
+        bool b_expired =
+            (board_io_time_ms() - began) >= ROBOT_HUMP_RECOVER_MS;
+        bool b_found = (b_following) && (!b_expired) &&
+                       (line_recover(p_line, 2u == recover,
+                                     ROBOT_HUMP_RECOVER_STEER_MM_SECOND));
+
+        if ((b_found) || (b_expired) || (!b_following))
+        {
+            mask = board_io_lock();
+            /* A new guard may have started a new recovery meanwhile. */
+            g_shared.recover = (began == g_shared.recover_at_ms)
+                                   ? 0u
+                                   : g_shared.recover;
+            board_io_unlock(mask);
+            tm_printf((UB *)"HUMP RECOVER: %s after steering %s\n",
+                      (UB *)(b_found ? "line found" : "gave up"),
+                      (UB *)((2u == recover) ? "left" : "right"));
+        }
     }
 }
 
@@ -1225,34 +1269,10 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
     field_write(93u, 8u, p_terrain->run_peak_mm);
     field_write(135u, 1u, p_terrain->b_on_hump);
     field_write(136u, 1u, p_terrain->b_peak_valid);
-    bool b_guard          = terrain_line_guard(p_terrain);
-    bool b_lifted         = terrain_lifted(p_terrain);
-    mask                  = board_io_lock();
-    g_shared.b_imu_ready  = terrain_ready(p_terrain);
-    bool b_was_guard      = g_shared.b_line_guard;
-    g_shared.b_line_guard = b_guard;
-    bool b_was_lifted     = g_shared.b_lifted;
-    g_shared.b_lifted     = b_lifted;
+    mask                 = board_io_lock();
+    g_shared.b_imu_ready = terrain_ready(p_terrain);
     board_io_unlock(mask);
-    /* Dashboard "Picked up" and "Hump guard" rows. */
-    field_write(221u, 1u, b_lifted ? 1u : 0u);
-    field_write(222u, 1u, b_guard ? 1u : 0u);
-
-    if (b_guard != b_was_guard)
-    {
-        tm_printf((UB *)"HUMP GUARD: %s (lean %d mg)\n",
-                  (UB *)(b_guard ? "on, line held straight" : "off"),
-                  (int)p_terrain->roll_milli);
-    }
-
-    if (b_lifted != b_was_lifted)
-    {
-        tm_printf((UB *)"LIFTED: %s (up speed %d mm/s, tilt %u ms)\n",
-                  (UB *)(b_lifted ? "picked up, wheels stop"
-                                  : "back on the floor, START works again"),
-                  (int)(p_terrain->lift_speed_um_s / 1000),
-                  (unsigned)p_terrain->lift_tilt_ms);
-    }
+    terrain_flags(p_terrain);
 
     if ((p_terrain->b_started) || (p_terrain->b_finished))
     {
@@ -1274,6 +1294,60 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
     if (0u != faults)
     {
         (void)tk_wup_tsk(gh_tasks[0]);
+    }
+}
+
+/** @brief Share the hump guard and lift flags, start the post-hump
+ * steer-back when the guard ends, and report changes.
+ */
+static void terrain_flags(const terrain_t * p_terrain)
+{
+    bool     b_guard      = terrain_line_guard(p_terrain);
+    bool     b_lifted     = terrain_lifted(p_terrain);
+    bool     b_left_up    = terrain_guard_left_up(p_terrain);
+    uint32_t now          = board_io_time_ms();
+    uint32_t mask         = board_io_lock();
+    bool     b_was_guard  = g_shared.b_line_guard;
+    g_shared.b_line_guard = b_guard;
+
+    if (b_guard)
+    {
+        g_shared.recover = 0u;
+    }
+    else if (b_was_guard)
+    {
+        /* Steer back toward the side that was raised. */
+        g_shared.recover       = b_left_up ? 2u : 1u;
+        g_shared.recover_at_ms = now;
+    }
+    else
+    {
+        /* No change: line_cycle() ends any recovery under way. */
+    }
+
+    bool b_was_lifted = g_shared.b_lifted;
+    g_shared.b_lifted = b_lifted;
+    board_io_unlock(mask);
+    /* Dashboard "Picked up" and "Hump guard" rows. */
+    field_write(221u, 1u, b_lifted ? 1u : 0u);
+    field_write(222u, 1u, b_guard ? 1u : 0u);
+
+    if (b_guard != b_was_guard)
+    {
+        const char * p_after = b_left_up ? ", steering left to the line"
+                                         : ", steering right to the line";
+        tm_printf((UB *)"HUMP GUARD: %s (lean %d mg)%s\n",
+                  (UB *)(b_guard ? "on, line held straight" : "off"),
+                  (int)p_terrain->roll_milli, (UB *)(b_guard ? "" : p_after));
+    }
+
+    if (b_lifted != b_was_lifted)
+    {
+        tm_printf((UB *)"LIFTED: %s (up speed %d mm/s, tilt %u ms)\n",
+                  (UB *)(b_lifted ? "picked up, wheels stop"
+                                  : "back on the floor, START works again"),
+                  (int)(p_terrain->lift_speed_um_s / 1000),
+                  (unsigned)p_terrain->lift_tilt_ms);
     }
 }
 #endif /* OBSTACLE_TEST || LINE_TEST */

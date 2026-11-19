@@ -65,6 +65,7 @@
  * leak step (speed / 500 x up to 100 ms) stays inside int32_t. */
 #define TERRAIN_LIFT_TILT_MAX_MS 511u
 #define TERRAIN_SETTLE_MAX_MS 1023u
+#define TERRAIN_GUARD_RUN_MAX 7u
 #define TERRAIN_LIFT_SPEED_LIMIT_UM_S 10000000
 
 static int32_t magnitude(int32_t value);
@@ -202,9 +203,27 @@ void terrain_step(terrain_t * p_terrain, const terrain_input_t * p_input)
 
     /* While a wheel climbs, the line and barcode sensors tilt and can read
      * white as black. The guard starts once a one-wheel lean is building,
-     * before the hump is confirmed, and is held for a moment after it. */
+     * before the hump is confirmed, and is held for a moment after it. A
+     * lean held for a few samples also starts it, with no travel or turn-rate
+     * gate: the misread steering itself turns the car and pauses arm_side().
+     */
+    bool b_leaning =
+        (p_terrain->b_calibrated) && (!p_terrain->b_lifted) &&
+        (magnitude(p_terrain->roll_milli) >= TERRAIN_LINE_GUARD_LEAN_MILLI);
+    uint32_t run = p_terrain->guard_run + 1u;
+    p_terrain->guard_run =
+        b_leaning
+            ? ((run > TERRAIN_GUARD_RUN_MAX) ? TERRAIN_GUARD_RUN_MAX : run)
+            : 0u;
+
+    if (b_leaning)
+    {
+        p_terrain->b_guard_left_up = (p_terrain->roll_milli > 0);
+    }
+
     if ((p_terrain->b_on_hump) ||
-        (p_terrain->side_confirm_mm >= TERRAIN_LINE_GUARD_MM))
+        (p_terrain->side_confirm_mm >= TERRAIN_LINE_GUARD_MM) ||
+        (p_terrain->guard_run >= TERRAIN_LINE_GUARD_SAMPLES))
     {
         p_terrain->guard_ms = TERRAIN_LINE_GUARD_HOLD_MS;
     }
@@ -217,6 +236,12 @@ void terrain_step(terrain_t * p_terrain, const terrain_input_t * p_input)
 bool terrain_line_guard(const terrain_t * p_terrain)
 {
     return (p_terrain->guard_ms > 0u);
+}
+
+/** @brief Which side was up during the last guard: true = left side. */
+bool terrain_guard_left_up(const terrain_t * p_terrain)
+{
+    return p_terrain->b_guard_left_up;
 }
 
 /** @brief True while the car is off the floor (see step_lift). */

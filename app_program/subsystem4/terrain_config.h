@@ -91,6 +91,14 @@
  * has gone. PROVISIONAL: shorten or lengthen from the ramp-run logs. */
 #define TERRAIN_LINE_GUARD_MM 10u
 #define TERRAIN_LINE_GUARD_HOLD_MS 300u
+/* Faster start (19 Nov: on the car the guard did not come on in time): a lean
+ * past 2 deg for 4 samples in a row starts it, with no travel or turn-rate
+ * condition. In the PC model it starts 55 mm up the ramp (75 mm before), and
+ * never on the flat with the ramp log's 60 mg noise or in curves (3% of the
+ * time with 100 mg). PROVISIONAL: lower it if the guard is still late, raise
+ * it if the guard comes on along the flat. */
+#define TERRAIN_LINE_GUARD_LEAN_MILLI 35
+#define TERRAIN_LINE_GUARD_SAMPLES 4u
 /* Picked up. On the floor the up axis averages 1 g. A hand lifting the car
  * pushes it upward, so the reading rises above 1 g for a moment. Vertical
  * speed is that extra reading x g x the measured time between samples, added

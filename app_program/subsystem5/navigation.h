@@ -8,7 +8,6 @@
 #include <stdint.h>
 
 #include "junction.h"
-#include "obstacle.h"
 
 /** @brief Task-private mission state uses eight values exactly. */
 typedef struct
@@ -27,21 +26,14 @@ typedef struct
     bool     b_estop : 1;
     uint32_t barcode : 2;
     uint32_t elapsed_ms : 14;
-    uint32_t look : 3;
-    uint32_t left_cm : 9;
-    uint32_t right_cm : 9;
     uint32_t side_mm : 12;
     uint32_t steps : 5;
     bool     b_margin : 1;
-    uint32_t width_mm : 12;
+    uint32_t measured_width_mm : 12; /* Both edges seen. Zero if unavailable. */
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
     bool b_line_seen : 1;
-    bool b_body_scan : 1;
-    uint32_t body_index : 4;
     uint32_t side_remaining_mm : 12;
-    uint16_t body_ranges[OBSTACLE_BODY_POINTS];
-    uint8_t scan_failure;
     uint32_t command;
     /* Last barcode letter, or '$' (JUNCTION_NONE) once used at a junction. */
     junction_t junction;
@@ -61,14 +53,9 @@ bool navigation_letter(navigation_t * p_navigation, char letter);
  * JUNCTION_IGNORED (letter kept) when the robot was not following the line.
  */
 uint8_t navigation_junction(navigation_t * p_navigation);
-/** @brief Accept a bounded width and side clearances for a pending bypass. */
-bool navigation_obstacle_plan(navigation_t * p_navigation, uint16_t width_mm,
-                               uint16_t left_cm, uint16_t right_cm);
-/** @brief Accept the servo scan's chosen side and sideways distance. */
+/** @brief Accept the servo scan's route and any measured width. */
 bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm,
                                uint16_t side_mm, bool b_left);
-/** @brief Request a centred-sensor body sweep for a pending bypass. */
-bool navigation_body_scan(navigation_t * p_navigation);
 /** @brief Run one 10-ms arbitration cycle; output is one packed command. */
 void navigation_step(navigation_t * p_navigation, uint8_t motion_mode,
                      bool b_done, bool b_line_valid, bool b_line_lost,

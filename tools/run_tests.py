@@ -80,6 +80,7 @@ def build_robot_os(root, executable):
                str(root / "app_program/subsystem2/motion.c"),
                str(root / "app_program/subsystem5/junction.c"),
                str(root / "app_program/subsystem5/navigation.c"),
+               str(root / "app_program/subsystem5/obstacle.c"),
                "-o", str(executable)]
     subprocess.run(command, check=True)
 
@@ -124,6 +125,9 @@ def main():
         barcode = decode(bytes.fromhex(barcode_vector))
         assert barcode["barcode_valid"] and barcode["barcode_letter"] == "Z"
         assert barcode["barcode_command"] == 1
+        width_vector = next(line.split()[1] for line in output.splitlines()
+                            if line.startswith("WIDTH_VECTOR "))
+        assert decode(bytes.fromhex(width_vector))["obstacle_width_mm"] == 134
         for command in ("stop", "start", "reset", "estop"):
             for sequence in range(16):
                 assert encode_command(command, sequence)[0] < 64

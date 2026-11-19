@@ -1,4 +1,4 @@
-VECTOR fa7ffaf71f090000c0ffa76d05b27c00eaffffffff0500000018a01f
+VECTOR fa7ffaf71f090000c0ffa76d05b27c00eaffffffff0500000018a01f000000
 MOTOR: forward, stronger left, 500 mm mismatch -4282 um
 MOTOR: forward, stronger right, 500 mm mismatch -4672 um
 MOTOR: reverse, stronger left, 500 mm mismatch 4282 um
@@ -31,10 +31,17 @@ TERRAIN: model of 10 mm ramp, true 250 mm/s, 20-ms step -> clean peak 7 mm; nois
 TERRAIN: small lean, 5-mm stone, hand lift, reversing, rocking, hard start -> no one-wheel hump; whole-car hump still 52 mm
 TERRAIN: R500/R300 curves and a spin -> no hump; ramp after a turn and during steering wobble -> found
 TERRAIN: fault, 10-s stuck and impact during a lean -> invalid, best peak stays 10 mm; 2 g ramp jolt ignored
+TERRAIN: line guard on at 75 mm into the ramp (hump confirmed at 95 mm), off after; flat with noise: on 0 of 3000 steps
+TERRAIN: never lifted on 5 ramp runs with landings (5 humps found), one hard jolt, or 60 s of noisy floor
+TERRAIN: lift caught 80 ms into a normal lift, 280 ms into a gentle one, 440 ms into a tip to 45 deg; ended 500 ms after being put down
 PASS: terrain (all groups)
 PASS: fields, motion, safety, terrain, line, obstacle, navigation, MQTT
 PASS: real ranging driver trigger, echoes, timeout, reset, timer wrap
 PASS: real clock startup sets 1-us tick after reset and USB boot
 PASS: real OS idle-event gating, queue source and saved diagnostics
-PASS: 70-mm/s body scan, bounded lateral legs and retries
+BARCODE_VECTOR 020000000000000000000000000050000000000000000000000000001a0000
+PASS: telemetry retains the scanned letter and action after a junction
+WIDTH_VECTOR 020000000000000000000000000075000c0000000000000000000000068600
+PASS: coarse scan publishes complete widths and plans both cases
+PASS: obstacle bypass, bounded lateral legs and retries
 PASS: Python command encoder and decoder rejection checks

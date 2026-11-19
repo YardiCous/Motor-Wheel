@@ -6,6 +6,7 @@
 #include <string.h>
 
 static uint32_t g_now;
+static uint16_t g_range_cm;
 static unsigned g_queued;
 static unsigned g_watchdog_lines;
 static unsigned g_queue_lines;
@@ -34,6 +35,51 @@ bool board_io_encoders(uint32_t *left, uint32_t *right)
     *left = 0u;
     *right = 0u;
     return true;
+}
+
+ER tk_wup_tsk(ID task)
+{
+    (void)task;
+    return E_OK;
+}
+
+void board_io_servo(uint8_t angle)
+{
+    assert(angle <= 60u);
+}
+
+void board_io_range_reset(void)
+{
+}
+
+void board_io_ping(void)
+{
+}
+
+bool board_io_range(uint16_t *range)
+{
+    *range = g_range_cm;
+    return true;
+}
+
+ER tk_dly_tsk(UINT delay)
+{
+    g_now += delay;
+    return E_OK;
+}
+
+ER tk_clr_flg(ID flag, UINT pattern)
+{
+    assert(flag == gh_echo_flag && pattern == 0u);
+    return E_OK;
+}
+
+ER tk_wai_flg(ID flag, UINT pattern, UINT mode, UINT *result, INT timeout)
+{
+    assert(flag == gh_echo_flag && pattern == 1u);
+    assert(mode == (TWF_ORW | TWF_BITCLR) && timeout > 0);
+    *result = pattern;
+    return E_OK;
 }
 
 ER tk_snd_mbf(ID queue, const void *message, INT length, INT timeout)
@@ -138,6 +184,77 @@ static void verify_barcode_telemetry(void)
     puts("PASS: telemetry retains the scanned letter and action after a junction");
 }
 
+static void verify_obstacle_width_telemetry(void)
+{
+    navigation_t manager = {0};
+    obstacle_t scanner = {0};
+    uint8_t angle = 30u;
+    uint8_t packet[DATA_FORMATS_TELEMETRY_BYTES] = {0u};
+    navigation_init(&manager);
+    assert(navigation_supervise(&manager, DATA_FORMATS_START, false));
+    obstacle_init(&scanner);
+    g_range_cm = 25u;
+    obstacle_cycle(&scanner, &angle);
+    navigation_cycle(&manager);
+    assert(manager.state == DATA_FORMATS_AVOID);
+    telemetry_enqueue();
+    assert(robot_os_telemetry(packet));
+    assert(data_formats_read(packet, 101u, 9u) == 25u);
+    assert(data_formats_read(packet, 232u, 12u) == 0u);
+
+    assert(obstacle_scan(&scanner));
+    for (uint8_t index = 0u; index < OBSTACLE_SCAN_POINTS; ++index)
+    {
+        g_range_cm = ((index >= 6u) && (index <= 14u)) ? 25u : 400u;
+        obstacle_cycle(&scanner, &angle);
+    }
+    navigation_cycle(&manager);
+    telemetry_enqueue();
+    assert(robot_os_telemetry(packet));
+    assert(data_formats_read(packet, 130u, 3u) == OBSTACLE_PLAN);
+    assert(data_formats_read(packet, 110u, 6u) == scanner.best_angle);
+    assert(data_formats_read(packet, 232u, 12u) == 134u);
+    (void)printf("WIDTH_VECTOR ");
+    for (size_t index = 0u; index < sizeof(packet); ++index)
+    {
+        (void)printf("%02x", packet[index]);
+    }
+    (void)puts("");
+
+    manager.state = DATA_FORMATS_FOLLOW;
+    obstacle_init(&scanner);
+    g_range_cm = 400u;
+    obstacle_cycle(&scanner, &angle);
+    navigation_cycle(&manager);
+    assert(field_read(232u, 12u) == 134u);
+
+    g_range_cm = 25u;
+    obstacle_cycle(&scanner, &angle);
+    navigation_cycle(&manager);
+    assert(field_read(232u, 12u) == 0u);
+    assert(obstacle_scan(&scanner));
+    for (uint8_t index = 0u; index < OBSTACLE_SCAN_POINTS; ++index)
+    {
+        g_range_cm = index < 6u ? 400u : 25u;
+        obstacle_cycle(&scanner, &angle);
+    }
+    navigation_cycle(&manager);
+    assert(scanner.width_mm == 0u);
+    assert(manager.stage == 1u);
+    assert(!manager.b_fault);
+    assert(field_read(130u, 3u) == OBSTACLE_PLAN);
+
+    field_write(0u, 3u, DATA_FORMATS_AVOID);
+    field_write(25u, 3u, MOTION_TURN);
+    g_range_cm = 400u;
+    obstacle_cycle(&scanner, &angle);
+    telemetry_enqueue();
+    assert(robot_os_telemetry(packet));
+    assert(data_formats_read(packet, 130u, 3u) == OBSTACLE_BYPASS);
+    assert(data_formats_read(packet, 232u, 12u) == 0u);
+    puts("PASS: coarse scan publishes complete widths and plans both cases");
+}
+
 int main(void)
 {
     line_t detector = {0};
@@ -202,5 +319,6 @@ int main(void)
     assert(g_watchdog_lines == 2u && g_queue_lines == 2u);
     puts("PASS: real OS idle-event gating, queue source and saved diagnostics");
     verify_barcode_telemetry();
+    verify_obstacle_width_telemetry();
     return 0;
 }

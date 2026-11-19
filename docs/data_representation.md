@@ -36,7 +36,7 @@ have the entire unsigned 32-bit modulo range as their valid domain.
 | barcode_event | 116 | 3 | Bits 0–1 are the mapped action (0 left, 1 right, 2 straight, 3 U-turn). Bit 2 marks a valid scan. |
 | line_error_offset | 119 | 8 | 0..254 = -127..127; 255 unused |
 | line_state | 127 | 3 | 0..5 |
-| obstacle_state | 130 | 3 | 0..7 (7 body scan) |
+| obstacle_state | 130 | 3 | 0..6 (7 in legacy packets) |
 | link | 133 | 2 | WiFi1 | MQTT1 |
 | on_hump | 135 | 1 | 0/1, whole-hump status |
 | height_valid | 136 | 1 | 0/1; never infer validity from a zero height |
@@ -49,9 +49,13 @@ have the entire unsigned 32-bit modulo range as their valid domain.
 | Reserved padding | 223 | 1 | Zero |
 | barcode_letter | 224 | 5 | 0 before the first scan, 1–26 for A–Z |
 | Reserved padding | 229 | 3 | Zero |
+| obstacle_width_mm | 232 | 12 | 1–4095 mm, 0 when unavailable |
+| Reserved padding | 244 | 4 | Zero |
 
 The barcode fields keep the last scan and its action after the junction.
 Legacy 28-byte packets end at bit 223 and carry only the action.
+The 29-byte format includes the letter and ends before obstacle width.
+Width is an estimate from both obstacle edges. The robot clears it at the start of the next avoidance or on reset.
 
 Motion snapshot offset 3 occupies exactly 32 bits: 12+9+1+3+7.
 Its full-width heartbeat age must be ≤20 ms before terrain uses it;
@@ -257,18 +261,13 @@ and the units for biased fields are described below and in the headers.
 | navigation / navigation_t | `b_estop` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `barcode` | 0..3 | 2 | unsigned bit-field |
 | navigation / navigation_t | `elapsed_ms` | 0..10000 | 14 | unsigned bit-field |
-| navigation / navigation_t | `look` | 0..7 | 3 | unsigned bit-field |
-| navigation / navigation_t | `left_cm` | 0..511 | 9 | unsigned bit-field |
-| navigation / navigation_t | `right_cm` | 0..511 | 9 | unsigned bit-field |
 | navigation / navigation_t | `side_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `steps` | 0..31 | 5 | unsigned bit-field |
 | navigation / navigation_t | `b_margin` | 0..1 | 1 | bool bit-field |
-| navigation / navigation_t | `width_mm` | 0..4095 | 12 | unsigned bit-field |
+| navigation / navigation_t | `measured_width_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `detected_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `b_first_forward` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `b_line_seen` | 0..1 | 1 | bool bit-field |
-| navigation / navigation_t | `b_body_scan` | 0..1 | 1 | bool bit-field |
-| navigation / navigation_t | `body_index` | 0..15 | 4 | unsigned bit-field |
 | navigation / navigation_t | `side_remaining_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `command` | 0..16777215 | 24 | explicit kind2 + distance12 + speed9 + reverse1; high8 zero |
 | obstacle / obstacle_t | `state` | 0..7 | 3 | unsigned bit-field |
@@ -302,7 +301,7 @@ and the units for biased fields are described below and in the headers.
 | Barcode queue event | A–Z or `#` for junction arrival | 5 | One ASCII byte |
 | Hump queue event | finished0/1, peak0..255 mm, valid0/1 | 10 | Two bytes; high six bits zero |
 | Supervisory queue entry | command2 + sequence4 + arrival32 | 38 | Five bytes; two unused bits zero; age≤500 ms |
-| Telemetry queue entry | application228 + arrival32 | 260 | 33 bytes, arrival at bit 232, latest only |
+| Telemetry queue entry | application240 + arrival32 | 272 | 35 bytes, arrival at bit 248, latest only |
 | ACK | echoed command2 + sequence4 + accepted1 | 7 | One byte; bit7 used by transport for malformed messages |
 | Status | WiFi at bit0 + MQTT at bit1 | 2 | One byte, upper six bits zero |
 

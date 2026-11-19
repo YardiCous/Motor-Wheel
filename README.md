@@ -105,35 +105,27 @@ A completed pulse below the sensor's 2-cm measuring range reports `1 cm`
 as a near-limit indication and triggers the existing close-obstacle stop.
 It is not discarded into the 400-cm no-echo fallback.
 The stopped scan covers -30 to +30 degrees in 3-degree steps. It estimates
-full width from the first clear ray beyond each edge and compares the two
-outer side readings. If that sweep cannot bound the width or establish a
-side route, `scan=7` requests an automatic body-assisted scan. The servo is
-centred, the robot turns left 90 degrees, samples every 15 degrees through
-right 90 degrees, then turns back to its original heading. Rays through
-75 degrees estimate both edges; the 90-degree readings compare actual side
-clearance. Invalid samples, unseen edges, or blocked routes still stop, with
-a specific console reason. Width assumes a roughly flat obstacle face and
-is affected by sensor position, beam spread, and turn calibration.
+full width from the first clear ray beyond each edge. When an edge is hidden,
+telemetry shows width as unavailable. The scan prefers a measured edge with
+clearance and otherwise picks the more open side. Width assumes a roughly
+flat obstacle face and is affected by sensor position and beam spread.
 
-The selected route turns 90 degrees (98 mm calibrated wheel travel), moves
-full width plus 150 mm of clearance, turns back 90 degrees, then moves the
-forward distance recorded when the obstacle was detected. For example, an
-estimated 162-mm box detected at 250 mm produces a 312-mm sideways leg and
-an initial 250-mm forward leg. The robot checks clearance after turning;
+The selected route turns 90 degrees, moves sideways to clear the chosen edge,
+then turns back 90 degrees. The sideways target includes the robot's turning
+radius and a 50-mm margin. The initial forward target is the saved detection
+distance plus the robot's length. The robot checks clearance after turning;
 blocked legs stop. It then checks obstacle depth with bounded extra forward
-moves before returning to the line. `PLAN` console messages report the width,
-sideways offset, saved forward distance, side readings, and selected side.
+moves before returning to the line. The plan records the width, sideways
+offset, saved forward distance, and selected side.
 After each forward leg it turns 90 degrees toward the obstacle and checks.
 If still blocked, it turns 90 degrees back, waits for a fresh forward reading,
 then advances another 140 mm in obstacle-test mode (70 mm/s times 2000 ms).
 This repeats up to the configured retry limit. A clear side check starts a
 200-mm forward margin, followed by another check before returning to the line;
 a blocked margin recheck resumes the retry loop.
-The servo scan has an 8-second deadline. Each body turn and bypass leg has
-its own 10-second limit. Large sideways offsets are split into checked moves
-of at most eight seconds each. `BODY_SCAN=1` forces body-based measurement
-after the initial servo scan; fallback is automatic with the normal command.
-Keep the ultrasonic head aligned forward for body scanning.
+The servo scan has an 8-second deadline. Each bypass turn and leg has a
+10-second limit. Large sideways offsets are split into checked moves of at
+most eight seconds each.
 
 RESET reinitialises the ranging pins and echo capture. The trigger pulse is
 timed directly for 12 microseconds, so it does not depend on a timer ISR.
@@ -219,17 +211,18 @@ use bounded nonblocking queues; they never call lwIP or CYW43 directly.
 
 | Topic | Payload |
 |---|---|
-| `robot/telemetry` | 29 bytes, 228 meaningful bits, 4 Hz |
+| `robot/telemetry` | 31 bytes, 240 meaningful bits, 4 Hz |
 | `robot/status` | 1 byte; WiFi at bit 0, MQTT at bit 1; upper six bits zero |
 | `robot/command` | 1 byte; command2, sequence4, reserved2=0 |
 | `robot/ack` | 1 byte; echoed command2/sequence4, accepted1, malformed1 |
 
 Payloads have no version field. Telemetry starts with the three-bit vehicle
 state. Bits 221 and 222 carry the IMU's "picked up" and hump line guard flags.
-The final byte carries the last scanned Code 39 letter (0 before a scan, 1–26
-for A–Z). Bits 116–118 carry its junction action and validity. The dashboard
-also accepts earlier 28-byte packets. Flash the updated firmware and restart
-the updated dashboard to see the letter.
+Byte 29 carries the last scanned Code 39 letter (0 before a scan, 1–26 for
+A–Z). Bits 116–118 carry its junction action and validity. Bits 232–243 carry
+the estimated obstacle width in millimetres, with 0 indicating unavailable.
+The dashboard also accepts earlier 28- and 29-byte packets. Flash the updated
+firmware and restart the dashboard to see the width estimate.
 
 ```sh
 python3 tools/dashboard/robot_protocol.py command stop 0

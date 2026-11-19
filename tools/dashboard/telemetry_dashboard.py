@@ -18,7 +18,8 @@ from urllib.parse import parse_qs, urlsplit
 import uuid
 import webbrowser
 
-from robot_protocol import FIELDS, LEGACY_PACKET_BYTES, decode, encode_command
+from robot_protocol import (BARCODE_PACKET_BYTES, FIELDS, LEGACY_PACKET_BYTES,
+                            PACKET_BYTES, decode, encode_command)
 
 ROOT = Path(__file__).resolve().parents[2]
 HTML = Path(__file__).with_suffix('.html')
@@ -336,6 +337,7 @@ def demo_loop(state, stop):
             offset += width
         # Code 39 Z maps to Right in the firmware's junction table.
         packet = word.to_bytes(LEGACY_PACKET_BYTES, 'little') + bytes([26])
+        packet += (220).to_bytes(PACKET_BYTES - BARCODE_PACKET_BYTES, 'little')
         state.ingest(state.topics['telemetry'], packet)
         stop.wait(.25)
 

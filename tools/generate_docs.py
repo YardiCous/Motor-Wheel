@@ -4,7 +4,8 @@ from pathlib import Path
 import re
 
 from format_c import ROOT, sources
-from robot_protocol import (BARCODE_LETTER_BITS, FIELDS, LEGACY_PACKET_BYTES,
+from robot_protocol import (BARCODE_LETTER_BITS, BARCODE_PACKET_BYTES, FIELDS,
+                            LEGACY_PACKET_BYTES, OBSTACLE_WIDTH_BITS,
                             PACKET_BYTES, PAYLOAD_BITS)
 
 MAXIMUMS = {
@@ -71,7 +72,7 @@ def main():
                 "servo_3deg": "0..60 = 0..180 degrees; selected profile angle in PLAN, otherwise commanded servo angle",
                 "barcode_event": "Bits 0–1 are the mapped action (0 left, 1 right, 2 straight, 3 U-turn). Bit 2 marks a valid scan.",
                 "line_error_offset": "0..254 = -127..127; 255 unused",
-                "line_state": "0..5", "obstacle_state": "0..7 (7 body scan)",
+                "line_state": "0..5", "obstacle_state": "0..6 (7 in legacy packets)",
                 "link": "WiFi1 | MQTT1", "on_hump": "0/1, whole-hump status",
                 "height_valid": "0/1; never infer validity from a zero height",
                 "wheel_left_offset": "0..1023 = -512..511 mm/s, bias 512",
@@ -87,11 +88,17 @@ def main():
     assert offset == 223
     letter_offset = LEGACY_PACKET_BYTES * 8
     padding_offset = letter_offset + BARCODE_LETTER_BITS
+    width_offset = BARCODE_PACKET_BYTES * 8
+    width_end = width_offset + OBSTACLE_WIDTH_BITS
     data += [f'| Reserved padding | {offset} | 1 | Zero |',
              f'| barcode_letter | {letter_offset} | {BARCODE_LETTER_BITS} | 0 before the first scan, 1–26 for A–Z |',
-             f'| Reserved padding | {padding_offset} | {PACKET_BYTES * 8 - padding_offset} | Zero |', "",
+             f'| Reserved padding | {padding_offset} | {width_offset - padding_offset} | Zero |',
+             f'| obstacle_width_mm | {width_offset} | {OBSTACLE_WIDTH_BITS} | 1–4095 mm, 0 when unavailable |',
+             f'| Reserved padding | {width_end} | {PACKET_BYTES * 8 - width_end} | Zero |', "",
              "The barcode fields keep the last scan and its action after the junction.",
-             f"Legacy {LEGACY_PACKET_BYTES}-byte packets end at bit {letter_offset - 1} and carry only the action.", "",
+             f"Legacy {LEGACY_PACKET_BYTES}-byte packets end at bit {letter_offset - 1} and carry only the action.",
+             f"The {BARCODE_PACKET_BYTES}-byte format includes the letter and ends before obstacle width.",
+             "Width is an estimate from both obstacle edges. The robot clears it at the start of the next avoidance or on reset.", "",
              "Motion snapshot offset 3 occupies exactly 32 bits: 12+9+1+3+7.",
              "Its full-width heartbeat age must be ≤20 ms before terrain uses it;",
              "the seven-bit stamp alone cannot detect long-stale data after wrap.", "",

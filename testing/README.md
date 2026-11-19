@@ -20,11 +20,9 @@ Navigation regression checks cover both bypass directions, asymmetric edge
 widths, missing edges, all-empty scans, blocked routes, calibrated quarter
 turns, full-width sideways travel, and the saved detection distance.
 
-Body-scan regression checks replay the flat 30-cm servo scan, verify a full
-left-to-right body sweep and return to the original heading, select both
-bypass directions, split large offsets, and reject unbounded widths. STOP
-and safety preemption are checked. The same body sweep and retry checks run
-at both normal and 70-mm/s obstacle-test speeds with sanitizers enabled.
+Coarse-scan checks verify that a hidden edge leaves the width unavailable in
+telemetry and that the bypass can still choose a side. Host tests also cover
+large offsets split into shorter legs, STOP, and safety preemption.
 
 The host runner also compiles the real `board_io.c` against mocked registers.
 It checks ultrasonic trigger completion without a timer ISR, echo distances,

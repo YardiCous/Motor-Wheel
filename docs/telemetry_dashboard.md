@@ -31,8 +31,8 @@ compiling or running C, and never exposes WiFi passwords to the browser.
 Restart the launcher after changing configuration or decoder code.
 
 Current telemetry and status payloads have no version field. Flash the updated
-firmware and restart the dashboard to see the Code 39 letter. The dashboard
-accepts both the current 29-byte telemetry packets and earlier 28-byte
+firmware and restart the dashboard to see obstacle width. The dashboard
+accepts the current 31-byte telemetry packets and earlier 28- and 29-byte
 packets. Status uses bit 0 for WiFi and bit 1 for MQTT.
 
 The Terrain card also shows two IMU flags. **Hump guard** is on while a wheel
@@ -45,9 +45,8 @@ dashboard rejects packets while either flag is on, so update both together.
 If stream activity reports `ValueError: reserved sensor value`, update both
 `robot_protocol.py` copies and restart the Python launcher. Firmware reports
 `range_cm=1` for a below-2-cm echo; the dashboard displays this as `<2 cm`.
-Obstacle state `7` means body scan. These values must remain visible rather
-than causing the whole telemetry packet to be rejected. Updating this decoder
-does not require reflashing the robot or correct a false physical echo.
+The dashboard accepts obstacle state `7` from older firmware and displays it
+as **Legacy scan**.
 
 For readings stuck at `<2 cm`, current MQTT firmware also prints USB `RANGE:`
 summaries and `ECHO:` diagnostics for failed or below-range pings. Capture a
@@ -74,7 +73,7 @@ python tools/dashboard/telemetry_dashboard.py --demo
 ```
 
 Demo mode needs only Python 3.10+ and the repository files. It creates valid
-29-byte packets and feeds them through the same decoder as real telemetry.
+31-byte packets and feeds them through the same decoder as real telemetry.
 The dashboard clearly labels simulated readings. Robot Start and Stop controls
 are disabled in demo mode.
 
@@ -104,23 +103,26 @@ well as subscribing to telemetry, status and acknowledgements.
 ## Readings and controls
 
 - Start and Stop buttons with robot acknowledgement and rejection feedback.
-- Ground and wheel speeds, wrapping distance, ultrasonic clearance and rate.
-- Left, Right and Barcode IR sensors, pitch, valid peak height, terrain,
-  servo and encoders.
-- The last Code 39 letter and its junction action, such as **Z · Right**.
-  The dashboard keeps showing it after the junction, until the next scan or
-  firmware reboot.
+- Ground and wheel speeds, wrapping distance and telemetry rate.
+- The **Barcode** panel shows the last Code 39 letter, its junction action
+  and the GP28 IR reading. The letter and action stay visible until the next
+  scan or firmware reboot.
+- The **Obstacle** panel shows forward clearance, estimated width, routine
+  and servo angle. Width is estimated when the scan sees both edges and stays
+  visible until the next avoidance begins or the robot resets. A dash means
+  the reading is unavailable. The robot plans its bypass from the coarse servo
+  sweep and checks clearance after turning.
+  `0x200` can indicate a blocked route, a failed scan, or an elapsed deadline.
+- Left and right line sensors, pitch, valid peak height, terrain and encoders.
 - Vehicle/controller states and all twelve fault bits, with WiFi/MQTT flags
   marked as advisory according to the firmware's fatal mask.
-- A 15 / 30 / 60 second chart, with any numeric decoded field selectable.
 - A searchable field explorer showing every field and the received packet hex.
 - Connection and decoder events, rejected packet count, and stale data status.
 
-The IR sensor panel, chart selector and field explorer use the physical roles:
-Left (GP26), Right (GP27) and Barcode (GP28). Their telemetry keys remain
-`ir_left`, `ir_centre` and `ir_right`, respectively; these keys also remain in
-CSV exports and can be searched in the field explorer. Hover over an IR field
-label to see its telemetry key.
+The sensor panels and field explorer use the physical roles Left (GP26),
+Right (GP27) and Barcode (GP28). Their telemetry keys `ir_left`, `ir_centre`
+and `ir_right` appear in CSV exports and can be searched in the field explorer.
+Hover over an IR field label to see its telemetry key.
 
 Readings older than two seconds are marked stale. The last valid values remain
 visible for inspection. MQTT retained messages are ignored because cached
@@ -184,14 +186,13 @@ robot decoder and are hidden when using `--decoder`.
 **Export CSV** downloads the browser's rolling buffer (up to 1,200 samples,
 about five minutes at 4 Hz). This is a live monitor, not a durable recorder;
 restarting Python clears history. A new browser tab initially loads the current
-server buffer. The chart leaves a gap across outages instead of joining them.
+server buffer.
 
 ## Add readings using only Python
 
 For the existing robot, no decoder code is needed: the dashboard already uses
 `robot_protocol.decode`, including its strict packet validation and signed/scaled
-conversions. The field explorer and chart options discover decoded fields
-automatically.
+conversions. The field explorer discovers decoded fields automatically.
 
 For a different packet format, write a trusted Python module such as
 `my_decoder.py`:
@@ -216,9 +217,9 @@ python tools/dashboard/telemetry_dashboard.py --decoder my_decoder.py --broker 1
 
 The launcher imports the module, subscribes to its topic, and calls `decode`
 for each raw MQTT payload. The returned dictionary drives the dashboard: the
-first three numeric fields become summary cards, all numeric fields become
-chart choices, and all fields appear in the explorer. Robot-specific panels
-are hidden for custom decoders. Return string keys and finite numbers,
+first three numeric fields become summary cards, and all fields appear in the
+explorer. Robot-specific panels are hidden for custom decoders. Return string
+keys and finite numbers,
 booleans, strings or `None`; raise `ValueError` for invalid packets. Exceptions
 are counted and displayed without stopping collection. Custom modules execute
 as normal Python and should contain only code you trust.

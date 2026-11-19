@@ -18,22 +18,27 @@ FIELDS = [
     ("wheel_right_offset", 10), ("lifted", 1), ("line_guard", 1),
 ]
 LEGACY_PACKET_BYTES = 28
-PACKET_BYTES = LEGACY_PACKET_BYTES + 1
+BARCODE_PACKET_BYTES = LEGACY_PACKET_BYTES + 1
+PACKET_BYTES = BARCODE_PACKET_BYTES + 2
 BARCODE_LETTER_BITS = 5
-PAYLOAD_BITS = 223 + BARCODE_LETTER_BITS
+OBSTACLE_WIDTH_BITS = 12
+PAYLOAD_BITS = 223 + BARCODE_LETTER_BITS + OBSTACLE_WIDTH_BITS
 assert sum(width for _, width in FIELDS) == 223
 
 
 def decode(payload: bytes) -> dict[str, int | float | bool | str | None]:
     """Validate length, padding and field ranges before scaling values."""
-    if len(payload) not in (LEGACY_PACKET_BYTES, PACKET_BYTES):
-        raise ValueError(f"telemetry requires {LEGACY_PACKET_BYTES} or {PACKET_BYTES} bytes")
+    if len(payload) not in (LEGACY_PACKET_BYTES, BARCODE_PACKET_BYTES, PACKET_BYTES):
+        raise ValueError("telemetry requires 28, 29, or 31 bytes")
     word = int.from_bytes(payload[:LEGACY_PACKET_BYTES], "little")
     if word >> 223:
         raise ValueError("reserved padding bits are set")
-    letter = payload[LEGACY_PACKET_BYTES] if len(payload) == PACKET_BYTES else 0
+    letter = payload[LEGACY_PACKET_BYTES] if len(payload) >= BARCODE_PACKET_BYTES else 0
     if letter > 26:
         raise ValueError("barcode letter code exceeds its valid range")
+    obstacle_width = int.from_bytes(payload[BARCODE_PACKET_BYTES:], "little")
+    if obstacle_width >> OBSTACLE_WIDTH_BITS:
+        raise ValueError("reserved obstacle width bits are set")
     result = {}
     offset = 0
     for name, width in FIELDS:
@@ -56,6 +61,7 @@ def decode(payload: bytes) -> dict[str, int | float | bool | str | None]:
     result["barcode_valid"] = bool(result["barcode_event"] & 4)
     result["barcode_command"] = result.pop("barcode_event") & 3
     result["barcode_letter"] = chr(ord("A") + letter - 1) if letter else None
+    result["obstacle_width_mm"] = obstacle_width or None
     return result
 
 

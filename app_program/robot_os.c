@@ -113,7 +113,6 @@ typedef struct
 {
     uint8_t  state;
     uint8_t  stage;
-    uint8_t  look;
     uint16_t faults;
     bool     b_avoided;
     uint32_t report_at_ms;
@@ -1355,12 +1354,6 @@ static void navigation_cycle(navigation_t * p_navigation)
     uint32_t obstacle_word  = field_read(101u, 9u);
     uint32_t obstacle_state = field_read(130u, 3u);
     bool     b_scan_ready   = (OBSTACLE_PLAN == obstacle_state);
-    if ((OBSTACLE_BODY_SCAN == obstacle_state) &&
-        (DATA_FORMATS_AVOID == p_navigation->state) &&
-        (0u == p_navigation->stage))
-    {
-        (void)navigation_body_scan(p_navigation);
-    }
 
     /* The servo half that faces left depends on its mounting. */
     uint32_t scan_angle  = field_read(110u, 6u);
@@ -1393,6 +1386,9 @@ static void navigation_cycle(navigation_t * p_navigation)
         navigation_init(p_navigation);
     }
 
+    field_write(DATA_FORMATS_OBSTACLE_WIDTH_OFFSET,
+                DATA_FORMATS_OBSTACLE_WIDTH_BITS,
+                p_navigation->measured_width_mm);
     uint16_t faults = p_navigation->b_fault ? DATA_FORMATS_FAULT_TIMEOUT : 0u;
     faults |= p_navigation->b_estop ? DATA_FORMATS_FAULT_ESTOP : 0u;
     fault_source(ROBOT_SOURCE_NAV, faults);
@@ -1682,7 +1678,6 @@ static void bench_init(bench_t * p_bench)
 {
     p_bench->state        = 0u;
     p_bench->stage        = 0u;
-    p_bench->look         = 0u;
     p_bench->faults       = 0u;
     p_bench->b_avoided    = false;
     p_bench->report_at_ms = board_io_time_ms();
@@ -1731,12 +1726,10 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
         if ((DATA_FORMATS_AVOID == state) && (1u == stage))
         {
             tm_printf((UB *)"PLAN: width=%u mm offset=%u mm forward=%u mm "
-                            "left=%u cm right=%u cm choose=%s\n",
-                      (unsigned)p_navigation->width_mm,
+                            "choose=%s\n",
+                      (unsigned)p_navigation->measured_width_mm,
                       (unsigned)p_navigation->side_mm,
                       (unsigned)p_navigation->detected_mm,
-                      (unsigned)p_navigation->left_cm,
-                      (unsigned)p_navigation->right_cm,
                       (UB *)(p_navigation->b_left ? "left" : "right"));
         }
     }
@@ -1769,33 +1762,12 @@ static void bench_step(navigation_t * p_navigation, bench_t * p_bench)
                   (unsigned)ages[3], (unsigned)ages[4]);
     }
 
-    if ((uint8_t)p_navigation->look != p_bench->look)
-    {
-        tm_printf((UB *)"OBSTACLE TEST: look=%u left=%u cm right=%u cm\n",
-                  (unsigned)p_navigation->look,
-                  (unsigned)p_navigation->left_cm,
-                  (unsigned)p_navigation->right_cm);
-        if (p_navigation->b_body_scan)
-        {
-            tm_printf((UB *)"BODY SCAN: phase=%u point=%u range=%u cm\n",
-                      (unsigned)p_navigation->look,
-                      (unsigned)p_navigation->body_index,
-                      (unsigned)field_read(101u, 9u));
-        }
-        p_bench->look = (uint8_t)p_navigation->look;
-    }
-
     uint16_t faults = (uint16_t)field_read(35u, 12u);
 
     if (faults != p_bench->faults)
     {
         tm_printf((UB *)"OBSTACLE TEST: faults=0x%03x range=%u cm\n",
                   (unsigned)faults, (unsigned)field_read(101u, 9u));
-        if (0u != p_navigation->scan_failure)
-        {
-            tm_printf((UB *)"BODY SCAN: failed: %s\n",
-                      (UB *)obstacle_reason_name(p_navigation->scan_failure));
-        }
         p_bench->faults = faults;
     }
 
@@ -1966,8 +1938,7 @@ static void obstacle_cycle(obstacle_t * p_obstacle, uint8_t * p_angle)
     uint32_t vehicle = field_read(0u, 3u);
 
     if ((DATA_FORMATS_AVOID == vehicle) && (MOTION_IDLE != motion_mode) &&
-        ((OBSTACLE_PLAN == p_obstacle->state) ||
-         (OBSTACLE_BODY_SCAN == p_obstacle->state)))
+        (OBSTACLE_PLAN == p_obstacle->state))
     {
         p_obstacle->state = OBSTACLE_BYPASS;
     }

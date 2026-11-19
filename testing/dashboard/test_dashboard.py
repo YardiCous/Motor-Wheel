@@ -80,6 +80,20 @@ class ProtocolTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         module.decode(packet)
 
+            barcode_packet = VECTOR + b'\x06'
+            self.assertIsNone(legacy['obstacle_width_mm'])
+            self.assertIsNone(module.decode(barcode_packet)['obstacle_width_mm'])
+            for width in (0, 1, 134, 1868, 4095):
+                with self.subTest(decoder=relative, width=width):
+                    values = module.decode(barcode_packet + width.to_bytes(2, 'little'))
+                    self.assertEqual(values['obstacle_width_mm'], width or None)
+                    self.assertEqual(values['barcode_letter'], 'F')
+                    self.assertEqual(values['range_cm'], 400)
+            for packet in (barcode_packet + b'\x00', barcode_packet + b'\x00\x10'):
+                with self.subTest(decoder=relative, invalid_width_packet=packet.hex()):
+                    with self.assertRaises(ValueError):
+                        module.decode(packet)
+
 
 def until(predicate, timeout=8):
     deadline = time.monotonic() + timeout
@@ -120,10 +134,10 @@ class StateTests(unittest.TestCase):
         self.state.ingest(TOPICS['telemetry'], VECTOR)
         self.assertEqual([s['id'] for s in self.state.snapshot(since=1)['samples']], [2])
 
-    def test_near_echo_and_body_scan_keep_dashboard_live(self):
+    def test_near_echo_and_legacy_scan_keep_dashboard_live(self):
         near = with_field(VECTOR, 101, 9, 1)
-        body = with_field(near, 130, 3, 7)
-        for packet in [VECTOR, near, body]:
+        legacy_scan = with_field(near, 130, 3, 7)
+        for packet in [VECTOR, near, legacy_scan]:
             self.state.ingest(TOPICS['telemetry'], packet)
         snapshot = self.state.snapshot()
         self.assertEqual(snapshot['received'], 3)
@@ -370,7 +384,13 @@ class HTTPTests(unittest.TestCase):
         try:
             with urlopen(url) as response:
                 self.assertEqual(response.status, 200)
-                self.assertIn(b'Motion over time', response.read())
+                page = response.read()
+                self.assertIn(b'<h2 id="barcode-heading">Barcode</h2>', page)
+                self.assertIn(b'<h2 id="obstacle-heading">Obstacle</h2>', page)
+                for field in ('barcode', 'barcode-action', 'ir-barcode', 'range',
+                              'obstacle-width', 'obstacle', 'servo'):
+                    self.assertEqual(page.count(f'id="{field}"'.encode()), 1)
+                self.assertNotIn(b'<canvas', page)
                 self.assertIn("frame-ancestors 'none'", response.headers['Content-Security-Policy'])
             with urlopen(url + '/api/state') as response:
                 payload = json.load(response)
@@ -403,6 +423,7 @@ class HTTPTests(unittest.TestCase):
                 self.assertEqual(payload['latest']['values']['vehicle'], 2)
                 self.assertEqual(payload['latest']['values']['barcode_letter'], 'Z')
                 self.assertEqual(payload['latest']['values']['barcode_command'], 1)
+                self.assertEqual(payload['latest']['values']['obstacle_width_mm'], 220)
         finally:
             process.terminate()
             _, error = process.communicate(timeout=5)
@@ -416,7 +437,7 @@ MQTT_AVAILABLE = importlib.util.find_spec('paho') is not None and shutil.which('
 class MQTTTests(unittest.TestCase):
     def test_subscribe_reject_and_reconnect(self):
         import paho.mqtt.client as mqtt
-        live_packet = with_field(VECTOR, 35, 12, 0) + b'\x06'
+        live_packet = with_field(VECTOR, 35, 12, 0) + b'\x06\x4c\x07'
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             port = probe.getsockname()[1]
@@ -493,6 +514,7 @@ class MQTTTests(unittest.TestCase):
             self.assertEqual(state.snapshot()['latest']['values']['pitch_deg'], -5.0)
             self.assertEqual(state.snapshot()['latest']['values']['barcode_letter'], 'F')
             self.assertEqual(state.snapshot()['latest']['values']['barcode_command'], 3)
+            self.assertEqual(state.snapshot()['latest']['values']['obstacle_width_mm'], 1868)
         finally:
             if publisher:
                 publisher.disconnect()

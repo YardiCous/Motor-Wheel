@@ -707,21 +707,14 @@ typedef struct
     bool     b_estop : 1;
     uint32_t barcode : 2;
     uint32_t elapsed_ms : 14;
-    uint32_t look : 3;
-    uint32_t left_cm : 9;
-    uint32_t right_cm : 9;
     uint32_t side_mm : 12;
     uint32_t steps : 5;
     bool     b_margin : 1;
-    uint32_t width_mm : 12;
+    uint32_t measured_width_mm : 12; /* Both edges seen. Zero if unavailable. */
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
     bool b_line_seen : 1;
-    bool b_body_scan : 1;
-    uint32_t body_index : 4;
     uint32_t side_remaining_mm : 12;
-    uint16_t body_ranges[OBSTACLE_BODY_POINTS];
-    uint8_t scan_failure;
     uint32_t command;
     /* Last barcode letter, or '$' (JUNCTION_NONE) once used at a junction. */
     junction_t junction;
@@ -745,17 +738,9 @@ Remember a barcode letter for the next junction.
 
 The line sensors reached a junction: use the remembered letter ('$' carries straight on). Returns the JUNCTION_* action taken, or JUNCTION_IGNORED (letter kept) when the robot was not following the line.
 
-`bool navigation_obstacle_plan(navigation_t * p_navigation, uint16_t width_mm, uint16_t left_cm, uint16_t right_cm);`
-
-Accept a bounded width and side clearances for a pending bypass.
-
 `bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm, uint16_t side_mm, bool b_left);`
 
-Accept the servo scan's chosen side and sideways distance.
-
-`bool navigation_body_scan(navigation_t * p_navigation);`
-
-Request a centred-sensor body sweep for a pending bypass.
+Accept the servo scan's route and any measured width.
 
 `void navigation_step(navigation_t * p_navigation, uint8_t motion_mode, bool b_done, bool b_line_valid, bool b_line_lost, bool b_on_hump, uint16_t range_cm, bool b_range_valid, bool b_scan_ready, bool b_scan_left, bool b_barcode_zone, bool b_safety_latched);`
 
@@ -780,7 +765,7 @@ typedef struct
     bool     b_ready : 1;
     uint32_t scan_ms : 13;
     uint16_t scan_cm[OBSTACLE_SCAN_POINTS];
-    uint16_t width_mm;
+    uint16_t width_mm; /* Full width when both edges are visible. */
     uint16_t side_mm;
     uint16_t left_cm;
     uint16_t right_cm;
@@ -809,10 +794,6 @@ Return an outlier-resistant median without adding readings.
 
 Combine zero to three echoes; no echo reports the maximum range.
 
-`uint16_t obstacle_body_width(const uint16_t * p_ranges);`
-
-Estimate width from body headings -90..90 in 15-degree steps. Returns zero when either edge or the front face cannot be established.
-
 `uint16_t obstacle_side_mm(uint32_t edge_mm);`
 
 Sideways travel that puts the robot clear of an edge this far from its centre: edge + turning radius + the side margin.
@@ -823,7 +804,7 @@ True when lateral free space fits the robot after side travel.
 
 `const char * obstacle_reason_name(uint8_t reason);`
 
-Describe the scan rejection or wider-scan request.
+Describe a scan result or rejection.
 
 ## testing/host/code39_host.h
 

@@ -84,6 +84,37 @@
  * Compared with accel_kin_mg, which reads high (see the timing note in the
  * test guide). PROVISIONAL. */
 #define TERRAIN_SIDE_ACCEL_MG 120
+/* Line guard. The team saw the left line sensor and the barcode sensor read
+ * black on white while a wheel climbed the ramp (15 Nov). The guard starts
+ * once the lean has been over the hump level for this much travel (before
+ * the hump is confirmed), and lasts until this long after the hump or lean
+ * has gone. PROVISIONAL: shorten or lengthen from the ramp-run logs. */
+#define TERRAIN_LINE_GUARD_MM 10u
+#define TERRAIN_LINE_GUARD_HOLD_MS 300u
+/* Picked up. On the floor the up axis averages 1 g. A hand lifting the car
+ * pushes it upward, so the reading rises above 1 g for a moment. Vertical
+ * speed is that extra reading x g x the measured time between samples, added
+ * up and leaking back to 0 over about half a second, so chip drift cannot
+ * build up. On this measure Ernest's floor runs of 4 Nov, ramp crossings
+ * included, peaked at 90 mm/s, and lifting the car's nose or side by hand on
+ * 29 Oct peaked at 207 to 1396 mm/s. PROVISIONAL: check with a lift test. */
+#define TERRAIN_LIFT_SPEED_MM_S 200
+#define TERRAIN_LIFT_LEAK_MS 500
+/* Each reading counts at most this far from flat, so one jolt alone (157 mm/s
+ * at a 20-ms step) cannot pass the level above. The biggest single jolt in
+ * those floor runs was +718 mg, when the sensor board hit the ramp. */
+#define TERRAIN_LIFT_JOLT_MG 800
+/* Or tilted far past any ramp: up below cos(30 deg) x flat for 200 ms. The
+ * floor runs never stayed past 30 deg for more than one sample. PROVISIONAL.
+ */
+#define TERRAIN_LIFT_TILT_PERMILLE 866
+#define TERRAIN_LIFT_TILT_MS 200u
+/* Back on the floor: up within 50 mg of flat and the car still, for 0.5 s.
+ * START is refused until then. PROVISIONAL. */
+#define TERRAIN_SETTLE_MG 50
+#define TERRAIN_SETTLE_MS 500u
+/* A longer gap between samples restarts the vertical speed from 0. */
+#define TERRAIN_LIFT_GAP_MS 100u
 /* Travel above 5 deg needed to confirm a hump (rejects short spikes).
  * Must stay below 64 (6-bit counter). PROVISIONAL. */
 #define TERRAIN_CONFIRM_MM 20u

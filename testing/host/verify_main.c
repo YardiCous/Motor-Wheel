@@ -352,6 +352,11 @@ static void verify_line_startup(void)
     assert(VERIFY_LINE_CALIBRATION == detector.calibration_samples);
     line_step(&detector, black, 0u, false);
     assert(LINE_JUNCTION == detector.state);
+    /* Tilted on a hump: straight ahead, and the false black is no junction. */
+    line_hold(&detector);
+    assert(LINE_TRACKING == detector.state);
+    assert(127u == detector.error);
+    assert(0u == detector.junction_ms);
 }
 
 /** @brief Ambiguous bars and reversing cannot generate a command. */

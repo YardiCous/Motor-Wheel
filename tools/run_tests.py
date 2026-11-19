@@ -18,7 +18,7 @@ FLAGS = ["-std=c99", "-Wall", "-Wextra", "-Werror", "-Wshadow",
          "-DROBOT_LINE_STRADDLE=0u", "-DROBOT_LINE_FRAMED_BARCODE=1u",
          "-DROBOT_CRUISE_MM_SECOND=500u", "-DROBOT_CAUTIOUS_MM_SECOND=250u",
          "-DROBOT_TURN_MM_SECOND=150u", "-DROBOT_SEARCH_MS=3000u",
-         "-DROBOT_BYPASS_MAX_STEPS=12u"]
+         "-DROBOT_BYPASS_MAX_STEPS=12u", "-DROBOT_SERVO_LEFT_HIGH=0u"]
 
 
 def build(root, executable, sanitize=True, bench=False):
@@ -120,7 +120,7 @@ def main():
             for sequence in range(16):
                 assert encode_command(command, sequence)[0] < 64
         try:
-            decode(bytes(27) + b"\x20")
+            decode(bytes(27) + b"\x80")
         except ValueError:
             pass
         else:

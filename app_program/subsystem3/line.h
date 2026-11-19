@@ -47,6 +47,8 @@ void line_step(line_t * p_line, const uint16_t * p_samples, uint16_t distance,
                bool b_planned_departure);
 /** @brief Return steering -127..127, with validity stored separately. */
 int16_t line_error(const line_t * p_line);
+/** @brief Drive straight and report no junction, after line_step(). */
+void line_hold(line_t * p_line);
 
 #endif /* LINE_H */
 

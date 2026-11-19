@@ -38,10 +38,18 @@ class ProtocolTests(unittest.TestCase):
             spec.loader.exec_module(module)
             self.assertNotIn('version', module.decode(VECTOR))
             self.assertEqual(module.decode(bytes(28))['vehicle'], 0)
-            for bit in (221, 222, 223):
-                with self.subTest(decoder=relative, padding_bit=bit):
-                    with self.assertRaises(ValueError):
-                        module.decode(with_field(VECTOR, bit, 1, 1))
+            with self.subTest(decoder=relative, padding_bit=223):
+                with self.assertRaises(ValueError):
+                    module.decode(with_field(VECTOR, 223, 1, 1))
+            # Bit 221 is "picked up" and bit 222 the hump line guard.
+            self.assertEqual(module.decode(VECTOR)['lifted'], 0)
+            self.assertEqual(module.decode(VECTOR)['line_guard'], 0)
+            for bit, name in ((221, 'lifted'), (222, 'line_guard')):
+                with self.subTest(decoder=relative, flag=name):
+                    values = module.decode(with_field(VECTOR, bit, 1, 1))
+                    self.assertEqual(values[name], 1)
+                    self.assertEqual(values['wheel_right_mm_second'],
+                                     module.decode(VECTOR)['wheel_right_mm_second'])
             for distance in [0, 1, 2, 400]:
                 for obstacle in range(8):
                     with self.subTest(decoder=relative, range_cm=distance, obstacle=obstacle):

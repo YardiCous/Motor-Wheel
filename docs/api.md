@@ -409,6 +409,10 @@ Process 12-bit ADC samples and modulo-4096 encoder distance.
 
 Return steering -127..127, with validity stored separately.
 
+`void line_hold(line_t * p_line);`
+
+Drive straight and report no junction, after line_step().
+
 ## app_program/subsystem3/scanner.h
 
 `void scanner_init(scanner_t * p_reader);`
@@ -533,6 +537,7 @@ typedef struct
     uint32_t distance_mm : 12;   /* Motion odometer, wraps at 4096 mm */
     bool     b_imu_ok : 1;       /* false: the I2C read failed */
     bool     b_motion_fresh : 1; /* false: Motion data older than 20 ms */
+    uint8_t  period_ms;          /* time since the last step; 0: 10 ms */
 } terrain_input_t;
 
 /** @brief Task-local terrain state. Not shared, so no lock is needed.  * Bounded states, counters and flags are packed into unsigned bit-fields. Signed working values (filters, height) use plain fixed-width integers: BARR-C forbids signed bit-fields, and offset-encoding them would add an add/subtract to every 10-ms step for no RAM saving worth having. /
@@ -548,6 +553,7 @@ typedef struct
     uint32_t phase_ms : 14;       /* time in the current phase, 0..10000 */
     uint32_t hump_ms : 14;        /* time since the hump started, 0..10000 */
     uint32_t gate_ms : 9;         /* landing-gate time left, 0..300 */
+    uint32_t guard_ms : 9;        /* line-guard time left, 0..511 */
     uint32_t impact_run : 2;      /* samples above impact threshold, 0..3 */
     uint32_t pitch_field : 7;     /* telemetry pitch, 0.5 deg, offset 64 */
     uint32_t hump_peak_mm : 8;    /* peak of the last finished hump */
@@ -569,6 +575,11 @@ typedef struct
     bool     b_impact : 1;        /* event this step: impact detected */
     bool     b_motion_changed : 1; /* event this step: motion changed */
     bool     b_request_init : 1;   /* caller must (re)initialise the chip */
+    bool     b_lifted : 1;         /* picked up, until back on the floor */
+    uint32_t lift_tilt_ms : 9;     /* time tilted past the lift angle */
+    uint32_t settle_ms : 10;       /* time level and still while lifted */
+    int32_t  lift_speed_um_s;      /* vertical speed estimate, + = up */
+    int32_t  baseline_up_x256;     /* flat-ground up reading, mg x 256 */
     int16_t  height_cmm;           /* running height of this hump, 0.01 mm */
     int16_t  peak_cmm;             /* highest height of this hump, 0.01 mm */
     int8_t   carry_um;             /* remainder below 0.01 mm, -9..9 um */
@@ -598,6 +609,14 @@ Advance the terrain statechart by one 10-ms sample.
 `bool terrain_ready(const terrain_t * p_terrain);`
 
 True once Safety may stop waiting: calibrated or faulted.
+
+`bool terrain_line_guard(const terrain_t * p_terrain);`
+
+True while a one-wheel hump tilts the line and barcode sensors: from a building lean, through the hump, and a moment after it.
+
+`bool terrain_lifted(const terrain_t * p_terrain);`
+
+True from the moment the car is picked up until it has been back on the floor, level and still, for TERRAIN_SETTLE_MS.
 
 `uint32_t terrain_pitch_field(int32_t pitch_cdeg);`
 

@@ -328,7 +328,8 @@ def demo_loop(state, stop):
                       height_valid=1, encoder_left=int(t * 600) % (1 << 32),
                       encoder_right=int(t * 600) % (1 << 32),
                       wheel_left_offset=int(752 + 42 * math.sin(t)),
-                      wheel_right_offset=int(752 + 28 * math.cos(t)))
+                      wheel_right_offset=int(752 + 28 * math.cos(t)),
+                      lifted=0, line_guard=int(hump > .2))
         word, offset = 0, 0
         for name, width in FIELDS:
             word |= values[name] << offset

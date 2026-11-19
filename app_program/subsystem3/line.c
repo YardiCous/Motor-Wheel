@@ -166,6 +166,21 @@ void line_step(line_t * p_line, const uint16_t * p_samples, uint16_t distance,
     }
 }
 
+/** @brief Straight ahead with no junction, for when the sensors cannot be
+ * trusted (one wheel on a hump tilts them, and white can read as black).
+ * Called after line_step(), so the next step starts from normal readings.
+ */
+void line_hold(line_t * p_line)
+{
+    p_line->error       = 127u;
+    p_line->junction_ms = 0u;
+
+    if (LINE_JUNCTION == p_line->state)
+    {
+        p_line->state = LINE_TRACKING;
+    }
+}
+
 /** @brief Offset binary avoids signed shifts in packed application data. */
 int16_t line_error(const line_t * p_line)
 {

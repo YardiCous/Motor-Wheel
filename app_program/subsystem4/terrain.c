@@ -61,6 +61,11 @@
 /* Raised wheel: track (mm) x sin x 1000 gives um; 10 um = 0.01 mm. */
 #define TERRAIN_SIDE_UM_PER_CMM 10
 #define TERRAIN_PERCENT 100
+/* Lift: bit-field limits, and a 10 m/s bound on the speed estimate so its
+ * leak step (speed / 500 x up to 100 ms) stays inside int32_t. */
+#define TERRAIN_LIFT_TILT_MAX_MS 511u
+#define TERRAIN_SETTLE_MAX_MS 1023u
+#define TERRAIN_LIFT_SPEED_LIMIT_UM_S 10000000
 
 static int32_t magnitude(int32_t value);
 static int32_t clamp(int32_t value, int32_t lower, int32_t upper);
@@ -89,10 +94,13 @@ static void    step_side(terrain_t * p_terrain);
 static void    add_height(terrain_t * p_terrain, int32_t ds_mm);
 static void    finish_hump(terrain_t * p_terrain, bool b_valid);
 static void    update_baseline(terrain_t *             p_terrain,
-                               const terrain_input_t * p_input);
-static void    classify(terrain_t * p_terrain, const terrain_input_t * p_input,
-                        int32_t forward);
-static void    advance_timers(terrain_t * p_terrain);
+                               const terrain_input_t * p_input, int32_t up);
+static void step_lift(terrain_t * p_terrain, const terrain_input_t * p_input,
+                      int32_t forward, int32_t up);
+static void lift_start(terrain_t * p_terrain);
+static void classify(terrain_t * p_terrain, const terrain_input_t * p_input,
+                     int32_t forward);
+static void advance_timers(terrain_t * p_terrain);
 
 /* Compile-time checks (C99 has no _Static_assert under -pedantic, so a
  * negative array size is used instead, as in data_formats.h). */
@@ -103,6 +111,13 @@ typedef uint8_t terrain_side_confirm_fits_t
 typedef uint8_t terrain_cal_fits_t[(TERRAIN_CAL_SAMPLES <= 63u) ? 1 : -1];
 typedef uint8_t
     terrain_gate_fits_t[(TERRAIN_LANDING_GATE_MS <= 511u) ? 1 : -1];
+typedef uint8_t
+    terrain_guard_fits_t[(TERRAIN_LINE_GUARD_HOLD_MS <= 511u) ? 1 : -1];
+typedef uint8_t terrain_lift_tilt_fits_t
+    [(TERRAIN_LIFT_TILT_MS <= TERRAIN_LIFT_TILT_MAX_MS) ? 1 : -1];
+typedef uint8_t
+    terrain_settle_fits_t[(TERRAIN_SETTLE_MS <= TERRAIN_SETTLE_MAX_MS) ? 1
+                                                                       : -1];
 typedef uint8_t terrain_filter_fits_t
     [((TERRAIN_ACCEL_LIMIT_MG * TERRAIN_FAST_DIVISOR) <= INT16_MAX) ? 1 : -1];
 
@@ -150,6 +165,11 @@ void terrain_step(terrain_t * p_terrain, const terrain_input_t * p_input)
     int32_t ds_mm = distance_step(p_terrain, p_input);
     update_filters(p_terrain, p_input, forward, left);
 
+    if (p_terrain->b_calibrated)
+    {
+        step_lift(p_terrain, p_input, forward, up);
+    }
+
     if (TERRAIN_CALIBRATING == p_terrain->state)
     {
         calibrate(p_terrain, p_input, forward, left, up);
@@ -163,10 +183,14 @@ void terrain_step(terrain_t * p_terrain, const terrain_input_t * p_input)
             p_terrain->phase_ms = 0u;
         }
     }
+    else if (p_terrain->b_lifted)
+    {
+        /* In someone's hand: no hump can start, and "flat" is not learned. */
+    }
     else
     {
         step_hump(p_terrain, ds_mm);
-        update_baseline(p_terrain, p_input);
+        update_baseline(p_terrain, p_input, up);
     }
 
     /* The telemetry pitch is the angle whose sine is sin_milli. */
@@ -175,8 +199,30 @@ void terrain_step(terrain_t * p_terrain, const terrain_input_t * p_input)
         (uint32_t)(TERRAIN_SIN_ONE_SQUARED - (sine * sine)));
     p_terrain->pitch_field =
         terrain_pitch_field(terrain_atan2_cdeg(sine, cosine));
+
+    /* While a wheel climbs, the line and barcode sensors tilt and can read
+     * white as black. The guard starts once a one-wheel lean is building,
+     * before the hump is confirmed, and is held for a moment after it. */
+    if ((p_terrain->b_on_hump) ||
+        (p_terrain->side_confirm_mm >= TERRAIN_LINE_GUARD_MM))
+    {
+        p_terrain->guard_ms = TERRAIN_LINE_GUARD_HOLD_MS;
+    }
+
     advance_timers(p_terrain);
     classify(p_terrain, p_input, forward);
+}
+
+/** @brief True while the line and barcode sensors should not be trusted. */
+bool terrain_line_guard(const terrain_t * p_terrain)
+{
+    return (p_terrain->guard_ms > 0u);
+}
+
+/** @brief True while the car is off the floor (see step_lift). */
+bool terrain_lifted(const terrain_t * p_terrain)
+{
+    return p_terrain->b_lifted;
 }
 
 /** @brief Safety must not wait forever for an IMU that is absent. */
@@ -537,6 +583,9 @@ static void calibrate(terrain_t * p_terrain, const terrain_input_t * p_input,
         p_terrain->baseline_x256 = baseline * TERRAIN_BASELINE_DIVISOR;
         p_terrain->baseline_left_x256 =
             (p_terrain->cal_left_sum / (int32_t)TERRAIN_CAL_SAMPLES) *
+            TERRAIN_BASELINE_DIVISOR;
+        p_terrain->baseline_up_x256 =
+            (p_terrain->cal_up_sum / (int32_t)TERRAIN_CAL_SAMPLES) *
             TERRAIN_BASELINE_DIVISOR;
         p_terrain->roll_x4      = 0;
         p_terrain->roll_milli   = 0;
@@ -935,7 +984,7 @@ static void finish_hump(terrain_t * p_terrain, bool b_valid)
  * and tracks slow drift. It freezes during a hump and while arming.
  */
 static void update_baseline(terrain_t *             p_terrain,
-                            const terrain_input_t * p_input)
+                            const terrain_input_t * p_input, int32_t up)
 {
     bool b_flat =
         (TERRAIN_LEVEL == p_terrain->state) && (!p_terrain->b_arming) &&
@@ -951,6 +1000,8 @@ static void update_baseline(terrain_t *             p_terrain,
                         p_terrain->accel_kin_mg;
         p_terrain->baseline_x256 +=
             level - (p_terrain->baseline_x256 / TERRAIN_BASELINE_DIVISOR);
+        p_terrain->baseline_up_x256 +=
+            up - (p_terrain->baseline_up_x256 / TERRAIN_BASELINE_DIVISOR);
 
         if (magnitude(filtered_turn_dps(p_terrain)) < TERRAIN_SIDE_TURN_DPS)
         {
@@ -961,6 +1012,92 @@ static void update_baseline(terrain_t *             p_terrain,
                 (p_terrain->baseline_left_x256 / TERRAIN_BASELINE_DIVISOR);
         }
     }
+}
+
+/** @brief Picked up: the car rose quickly, or tilted far past any ramp.
+ * Vertical speed v += (up - flat) x g x dt, then v -= v x dt / 500 ms. On the
+ * floor the up reading averages flat, so v stays near 0 even over bumps; a
+ * lift pushes it up. dt is the measured step, so this does not depend on the
+ * task period. Lifted ends once the car is level and still for a while.
+ */
+static void step_lift(terrain_t * p_terrain, const terrain_input_t * p_input,
+                      int32_t forward, int32_t up)
+{
+    int32_t period = (0u == p_input->period_ms) ? (int32_t)ROBOT_IMU_PERIOD_MS
+                                                : (int32_t)p_input->period_ms;
+    int32_t flat   = p_terrain->baseline_up_x256 / TERRAIN_BASELINE_DIVISOR;
+    int32_t vertical = up - flat;
+    int32_t speed    = 0;
+
+    if (period <= (int32_t)TERRAIN_LIFT_GAP_MS)
+    {
+        /* mg x 9807 / 1000 is mm/s^2, and mm/s^2 x ms is um/s. */
+        int32_t push =
+            clamp(vertical, -TERRAIN_LIFT_JOLT_MG, TERRAIN_LIFT_JOLT_MG);
+        int32_t accel_mm_s2 =
+            (push * TERRAIN_GRAVITY_MM_S2) / TERRAIN_MG_PER_G;
+        speed = p_terrain->lift_speed_um_s + (accel_mm_s2 * period);
+        speed -= (speed / TERRAIN_LIFT_LEAK_MS) * period;
+        speed = clamp(speed, -TERRAIN_LIFT_SPEED_LIMIT_UM_S,
+                      TERRAIN_LIFT_SPEED_LIMIT_UM_S);
+    }
+
+    p_terrain->lift_speed_um_s = speed;
+    bool b_tilted =
+        ((up * TERRAIN_MILLI) < (flat * TERRAIN_LIFT_TILT_PERMILLE));
+    uint32_t tilt_ms = p_terrain->lift_tilt_ms + (uint32_t)period;
+    tilt_ms = (tilt_ms > TERRAIN_LIFT_TILT_MAX_MS) ? TERRAIN_LIFT_TILT_MAX_MS
+                                                   : tilt_ms;
+    p_terrain->lift_tilt_ms = b_tilted ? tilt_ms : 0u;
+
+    if (!p_terrain->b_lifted)
+    {
+        bool b_rising = (speed > (TERRAIN_LIFT_SPEED_MM_S * TERRAIN_MILLI));
+        bool b_tipped = (p_terrain->lift_tilt_ms >= TERRAIN_LIFT_TILT_MS);
+
+        if ((b_rising) || (b_tipped))
+        {
+            lift_start(p_terrain);
+        }
+    }
+    else
+    {
+        int32_t smooth = p_terrain->forward_x8 / TERRAIN_FAST_DIVISOR;
+        bool    b_settled =
+            (magnitude(vertical) <= TERRAIN_SETTLE_MG) &&
+            (magnitude(forward - smooth) <= TERRAIN_STILL_JITTER_MG);
+        uint32_t settle_ms = p_terrain->settle_ms + (uint32_t)period;
+        settle_ms = (settle_ms > TERRAIN_SETTLE_MAX_MS) ? TERRAIN_SETTLE_MAX_MS
+                                                        : settle_ms;
+        p_terrain->settle_ms = b_settled ? settle_ms : 0u;
+
+        if (p_terrain->settle_ms >= TERRAIN_SETTLE_MS)
+        {
+            p_terrain->b_lifted        = false;
+            p_terrain->settle_ms       = 0u;
+            p_terrain->lift_tilt_ms    = 0u;
+            p_terrain->lift_speed_um_s = 0;
+        }
+    }
+}
+
+/** @brief A lift is not a hump: drop any hump or arming under way, and wait
+ * for flat and upright before the next one can start. */
+static void lift_start(terrain_t * p_terrain)
+{
+    if (p_terrain->b_on_hump)
+    {
+        finish_hump(p_terrain, false);
+    }
+
+    p_terrain->b_lifted          = true;
+    p_terrain->settle_ms         = 0u;
+    p_terrain->b_arming          = false;
+    p_terrain->confirm_mm        = 0u;
+    p_terrain->side_confirm_mm   = 0u;
+    p_terrain->side_arm_peak_cmm = 0;
+    p_terrain->b_wait_flat       = true;
+    p_terrain->b_side_wait       = true;
 }
 
 /** @brief Pick one motion class, most important first; flag changes. */
@@ -1038,6 +1175,8 @@ static void advance_timers(terrain_t * p_terrain)
 
     p_terrain->gate_ms =
         (p_terrain->gate_ms > period) ? (p_terrain->gate_ms - period) : 0u;
+    p_terrain->guard_ms =
+        (p_terrain->guard_ms > period) ? (p_terrain->guard_ms - period) : 0u;
 }
 
 /*** End of file. ***/

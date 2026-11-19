@@ -34,6 +34,13 @@ Current telemetry and status payloads have no version field. Flash the updated
 firmware and restart the updated dashboard together: telemetry fields have
 shifted down two bits, and status now uses bit 0 for WiFi and bit 1 for MQTT.
 
+The Terrain card also shows two IMU flags. **Hump guard** is on while a wheel
+climbs a one-wheel hump: the line sensors are held straight and junctions and
+barcodes are ignored. **Picked up** means the IMU saw the car lifted: the
+mission has stopped as if Stop was pressed, and Start is refused until the car
+has been back on the floor, level and still, for half a second. An older
+dashboard rejects packets while either flag is on, so update both together.
+
 If stream activity reports `ValueError: reserved sensor value`, update both
 `robot_protocol.py` copies and restart the Python launcher. Firmware reports
 `range_cm=1` for a below-2-cm echo; the dashboard displays this as `<2 cm`.

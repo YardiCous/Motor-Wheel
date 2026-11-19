@@ -31,6 +31,14 @@
 #define ROBOT_REBOOT_HOLD_MS 3000u
 #define ROBOT_RANGE_POWER_UP_MS 1500u
 #define ROBOT_SERVO_SETTLE_MS 300u
+/* 1: scan servo angles above centre (30) point to the robot's left, the way
+ * a hobby servo usually turns when mounted upright. 0: the opposite. The
+ * team saw the robot turn toward a blocked side (15 Nov), which fits 1.
+ * PROVISIONAL: check with the obstacle test, hand on one side. Host tests
+ * set 0, the layout their expected values were written for. */
+#ifndef ROBOT_SERVO_LEFT_HIGH
+#define ROBOT_SERVO_LEFT_HIGH 1u
+#endif /* ROBOT_SERVO_LEFT_HIGH */
 #define ROBOT_BARCODE_DRIVE_MM 400u
 #define ROBOT_BARCODE_DRIVE_MM_SECOND 50u
 /* Per-sensor black thresholds; each sensor reads white differently. */

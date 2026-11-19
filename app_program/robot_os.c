@@ -73,6 +73,8 @@ typedef struct
     bool     b_network_online : 1;
     bool     b_line_visible : 1;
     bool     b_line_lost : 1;
+    bool     b_line_guard : 1; /* hump tilt: hold the line sensors straight */
+    bool     b_lifted : 1;     /* picked up: wheels stop, START waits */
     uint32_t reset_at_ms;
 } shared_t;
 
@@ -206,6 +208,7 @@ static void local_commands(navigation_t * p_navigation);
 static void local_command(navigation_t * p_navigation, uint8_t command,
                           bool b_latched);
 static void remote_commands(navigation_t * p_navigation);
+static void lift_stop(navigation_t * p_navigation);
 static void dispatch_navigation(navigation_t * p_navigation);
 #endif /* MOTOR_TEST && ENCODER_TEST */
 #if !LINE_TEST
@@ -761,6 +764,7 @@ static void navigation_task(INT start, void * p_argument)
         wait_release();
         local_commands(&manager);
         remote_commands(&manager);
+        lift_stop(&manager);
         navigation_cycle(&manager);
 #if OBSTACLE_TEST
         bench_step(&manager, &bench);
@@ -1072,10 +1076,23 @@ static void line_cycle(line_t * p_line, scanner_t * p_reader,
                                        (DATA_FORMATS_SEARCH == vehicle) ||
                                        (DATA_FORMATS_BARCODE == vehicle);
     uint32_t snapshot                = field_read(3u, 32u);
+    uint32_t mask                    = board_io_lock();
+    bool     b_guard                 = g_shared.b_line_guard;
+    board_io_unlock(mask);
     /* Distance occupies the snapshot's low twelve bits. */
     line_step(p_line, samples, (uint16_t)(snapshot & 4095u), b_departure);
+
+    if (b_guard)
+    {
+        /* One wheel on a hump tilts the sensors: white can read as black.
+         * Humps are on straights, so drive straight and read no junction
+         * or barcode until the guard ends. */
+        line_hold(p_line);
+    }
+
     /* GP28 is the third sample. */
-    line_events(p_line, p_reader, samples[2], b_departure, pb_junction);
+    line_events(p_line, p_reader, samples[2], (b_departure) || (b_guard),
+                pb_junction);
     field_write(119u, 8u, p_line->error);
     /* A barcode under GP28 reports SCAN, which slows line following. */
     bool b_scan = (p_reader->b_scanning) && (LINE_TRACKING == p_line->state);
@@ -1086,7 +1103,7 @@ static void line_cycle(line_t * p_line, scanner_t * p_reader,
         field_write(47u + (sensor * 12u), 12u, samples[sensor]);
     }
 
-    uint32_t mask         = board_io_lock();
+    mask                  = board_io_lock();
     g_shared.b_line_ready = b_valid && (LINE_CALIBRATING != p_line->state);
     board_io_unlock(mask);
     mask                    = board_io_lock();
@@ -1153,7 +1170,10 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
     bool     b_reset     = g_shared.b_reset_imu;
     g_shared.b_reset_imu = false;
     uint32_t motion_time = g_heartbeat[0];
+    uint32_t last_step   = g_heartbeat[2];
     board_io_unlock(mask);
+    /* The real time since the last step, for the lift speed estimate. */
+    uint32_t gap = board_io_time_ms() - last_step;
 
     if (b_reset)
     {
@@ -1170,6 +1190,7 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
     input.b_imu_ok =
         (*pb_configured) && (drv_lsm303_accel(p_imu, NULL, input.accel_mg));
     input.b_motion_fresh = (board_io_time_ms() - motion_time) <= 20u;
+    input.period_ms      = (uint8_t)((gap > 255u) ? 255u : gap);
     uint32_t snapshot    = field_read(3u, 32u);
     /* The nine-bit speed has maximum magnitude 511. */
     int16_t speed     = (int16_t)((snapshot >> 12u) & 511u);
@@ -1189,9 +1210,34 @@ static void terrain_cycle(terrain_t * p_terrain, drv_lsm303_t * p_imu,
     field_write(93u, 8u, p_terrain->run_peak_mm);
     field_write(135u, 1u, p_terrain->b_on_hump);
     field_write(136u, 1u, p_terrain->b_peak_valid);
-    mask                 = board_io_lock();
-    g_shared.b_imu_ready = terrain_ready(p_terrain);
+    bool b_guard          = terrain_line_guard(p_terrain);
+    bool b_lifted         = terrain_lifted(p_terrain);
+    mask                  = board_io_lock();
+    g_shared.b_imu_ready  = terrain_ready(p_terrain);
+    bool b_was_guard      = g_shared.b_line_guard;
+    g_shared.b_line_guard = b_guard;
+    bool b_was_lifted     = g_shared.b_lifted;
+    g_shared.b_lifted     = b_lifted;
     board_io_unlock(mask);
+    /* Dashboard "Picked up" and "Hump guard" rows. */
+    field_write(221u, 1u, b_lifted ? 1u : 0u);
+    field_write(222u, 1u, b_guard ? 1u : 0u);
+
+    if (b_guard != b_was_guard)
+    {
+        tm_printf((UB *)"HUMP GUARD: %s (lean %d mg)\n",
+                  (UB *)(b_guard ? "on, line held straight" : "off"),
+                  (int)p_terrain->roll_milli);
+    }
+
+    if (b_lifted != b_was_lifted)
+    {
+        tm_printf((UB *)"LIFTED: %s (up speed %d mm/s, tilt %u ms)\n",
+                  (UB *)(b_lifted ? "picked up, wheels stop"
+                                  : "back on the floor, START works again"),
+                  (int)(p_terrain->lift_speed_um_s / 1000),
+                  (unsigned)p_terrain->lift_tilt_ms);
+    }
 
     if ((p_terrain->b_started) || (p_terrain->b_finished))
     {
@@ -1275,7 +1321,10 @@ static void navigation_cycle(navigation_t * p_navigation)
         (void)navigation_body_scan(p_navigation);
     }
 
-    bool b_scan_left = (field_read(110u, 6u) < 30u);
+    /* The servo half that faces left depends on its mounting. */
+    uint32_t scan_angle  = field_read(110u, 6u);
+    bool     b_scan_left = (0u != ROBOT_SERVO_LEFT_HIGH) ? (scan_angle > 30u)
+                                                         : (scan_angle < 30u);
     if (b_scan_ready && (DATA_FORMATS_AVOID == p_navigation->state) &&
         (0u == p_navigation->stage) && (0u == p_navigation->side_mm))
     {
@@ -1346,9 +1395,10 @@ static void local_commands(navigation_t * p_navigation)
 
     if (stable_count >= 3u)
     {
-        uint32_t pressed   = (uint32_t)buttons & ~(uint32_t)g_buttons.previous;
-        uint32_t mask      = board_io_lock();
-        bool     b_latched = g_shared.b_latched;
+        uint32_t pressed = (uint32_t)buttons & ~(uint32_t)g_buttons.previous;
+        uint32_t mask    = board_io_lock();
+        /* Only START looks at this: it also waits while the car is lifted. */
+        bool b_latched = (g_shared.b_latched) || (g_shared.b_lifted);
         board_io_unlock(mask);
 
         if (0u != (pressed & 2u))
@@ -1389,6 +1439,25 @@ static void local_command(navigation_t * p_navigation, uint8_t command,
 #endif /* OBSTACLE_TEST */
 }
 
+/** @brief Picked up: stop the wheels the same way the dashboard's STOP does.
+ * START is refused until the IMU says the car is back on the floor.
+ */
+static void lift_stop(navigation_t * p_navigation)
+{
+    uint32_t mask     = board_io_lock();
+    bool     b_lifted = g_shared.b_lifted;
+    board_io_unlock(mask);
+    bool b_moving = (DATA_FORMATS_IDLE != p_navigation->state) &&
+                    (DATA_FORMATS_FAULT != p_navigation->state);
+
+    if ((b_lifted) && (b_moving))
+    {
+        (void)navigation_supervise(p_navigation, DATA_FORMATS_STOP, false);
+        tm_printf((UB *)"LIFTED: stopped. Put the car down, wait 1 s, then "
+                        "press START\n");
+    }
+}
+
 /** @brief Network sequence and age validation happen before mission mutation.
  */
 static void remote_commands(navigation_t * p_navigation)
@@ -1406,7 +1475,8 @@ static void remote_commands(navigation_t * p_navigation)
         uint32_t mask    = board_io_lock();
         bool b_new = (!g_shared.b_sequence_valid) ||
                      (data_formats_sequence_new(sequence, g_shared.sequence));
-        bool b_latched = g_shared.b_latched;
+        /* Only START looks at this: it also waits while the car is lifted. */
+        bool b_latched = (g_shared.b_latched) || (g_shared.b_lifted);
         bool b_armed   = g_shared.b_remote_armed;
         board_io_unlock(mask);
         b_valid = b_valid && ((DATA_FORMATS_START != command) || b_armed);

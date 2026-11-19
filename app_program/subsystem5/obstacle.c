@@ -20,6 +20,7 @@ static const uint16_t g_tangent[11] = {0u,   52u,  105u, 158u, 213u, 268u,
 static const uint16_t g_cosine[11]  = {1000u, 999u, 995u, 988u, 978u, 966u,
                                        951u,  934u, 914u, 891u, 866u};
 
+static uint8_t  side_index(uint8_t offset, bool b_left);
 static void     finish_scan(obstacle_t * p_obstacle);
 static uint16_t edge_offset(const obstacle_t * p_obstacle, bool b_left);
 static uint16_t side_openness(const obstacle_t * p_obstacle, bool b_left);
@@ -88,6 +89,17 @@ void obstacle_sample(obstacle_t * p_obstacle, uint16_t range_cm, bool b_valid)
     }
 }
 
+/** @brief Scan index of the ray this many steps to one side of centre.
+ * Which half of the sweep is the robot's left depends on how the servo is
+ * mounted (ROBOT_SERVO_LEFT_HIGH in robot_config.h).
+ */
+static uint8_t side_index(uint8_t offset, bool b_left)
+{
+    bool b_high = (b_left == (0u != ROBOT_SERVO_LEFT_HIGH));
+    return b_high ? (uint8_t)(OBSTACLE_MIDDLE_INDEX + offset)
+                  : (uint8_t)(OBSTACLE_MIDDLE_INDEX - offset);
+}
+
 /** @brief Locate the first ray beyond each edge of the front-facing object.
  * A ray belongs to the obstacle while its forward projection is close to
  * the centre face. The first clear ray gives a conservative angular bound.
@@ -98,8 +110,7 @@ static uint16_t edge_offset(const obstacle_t * p_obstacle, bool b_left)
 
     for (uint8_t offset = 1u; offset <= OBSTACLE_MIDDLE_INDEX; ++offset)
     {
-        uint8_t  index   = b_left ? (OBSTACLE_MIDDLE_INDEX - offset)
-                                  : (OBSTACLE_MIDDLE_INDEX + offset);
+        uint8_t  index   = side_index(offset, b_left);
         uint32_t range   = p_obstacle->scan_cm[index];
         uint32_t depth   = (range * 10u * g_cosine[offset]) / 1000u;
         bool     b_clear = (ROBOT_RANGE_MAX_CM == range) ||
@@ -124,8 +135,7 @@ static uint16_t side_openness(const obstacle_t * p_obstacle, bool b_left)
     for (uint8_t offset = OBSTACLE_SIDE_FIRST_OFFSET;
          offset <= OBSTACLE_MIDDLE_INDEX; ++offset)
     {
-        uint8_t  index = b_left ? (OBSTACLE_MIDDLE_INDEX - offset)
-                                : (OBSTACLE_MIDDLE_INDEX + offset);
+        uint8_t  index = side_index(offset, b_left);
         uint16_t range = p_obstacle->scan_cm[index];
         best = ((range >= OBSTACLE_SELF_CM) && (range > best)) ? range : best;
     }
@@ -167,7 +177,8 @@ static void finish_scan(obstacle_t * p_obstacle)
             : b_open;
     p_obstacle->b_ready    = b_front;
     p_obstacle->side_mm    = p_obstacle->b_left ? need_left : need_right;
-    p_obstacle->best_angle = p_obstacle->b_left ? 20u : 40u;
+    bool b_high = (p_obstacle->b_left == (0u != ROBOT_SERVO_LEFT_HIGH));
+    p_obstacle->best_angle = b_high ? 40u : 20u;
     p_obstacle->best_cm =
         p_obstacle->b_left ? p_obstacle->left_cm : p_obstacle->right_cm;
     p_obstacle->state = b_front ? OBSTACLE_PLAN : OBSTACLE_ABORT;

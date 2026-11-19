@@ -42,7 +42,7 @@
       </section>
       <div class="two-up robot-panel">
         <section class="card"><div class="card-head"><h2>IR sensors</h2><span class="eyebrow">ADC / 4095</span></div><div class="sensors"><div class="sensor-row"><span>Left</span><div class="track"><div class="fill" id="ir-left-bar"></div></div><span class="sensor-value mono" id="ir-left">—</span></div><div class="sensor-row"><span>Right</span><div class="track"><div class="fill" id="ir-line-right-bar"></div></div><span class="sensor-value mono" id="ir-line-right">—</span></div><div class="sensor-row"><span>Barcode</span><div class="track"><div class="fill" id="ir-barcode-bar"></div></div><span class="sensor-value mono" id="ir-barcode">—</span></div><div class="sensor-foot"><span id="line-state">Waiting</span><span>Error <b class="mono" id="line-error">—</b></span></div></div></section>
-        <section class="card"><div class="card-head"><h2>Terrain & attitude</h2><span class="eyebrow" id="terrain-state">Waiting</span></div><div class="terrain"><div class="pitch-visual" aria-hidden="true"><div class="robot-line" id="robot-pitch"></div></div><div class="kv-row"><span>Pitch</span><span class="mono" id="pitch">—</span></div><div class="kv-row"><span>Peak height</span><span class="mono" id="peak">—</span></div><div class="kv-row"><span>On hump</span><span id="hump">—</span></div></div></section>
+        <section class="card"><div class="card-head"><h2>Terrain & attitude</h2><span class="eyebrow" id="terrain-state">Waiting</span></div><div class="terrain"><div class="pitch-visual" aria-hidden="true"><div class="robot-line" id="robot-pitch"></div></div><div class="kv-row"><span>Pitch</span><span class="mono" id="pitch">—</span></div><div class="kv-row"><span>Peak height</span><span class="mono" id="peak">—</span></div><div class="kv-row"><span>On hump</span><span id="hump">—</span></div><div class="kv-row"><span>Hump guard</span><span id="line-guard">—</span></div><div class="kv-row"><span>Picked up</span><span id="lifted">—</span></div></div></section>
       </div>
     </div>
     <div class="right-col">
@@ -121,6 +121,7 @@ function render(s){
     for(const [key,{id}] of Object.entries(irSensors)){put(id,v[key]);$(`${id}-bar`).style.width=`${Math.max(0,Math.min(100,(v[key]??0)/4095*100))}%`}
     put('line-state',label('line_state',v.line_state));put('line-error',v.line_error);put('terrain-state',label('terrain',v.terrain));put('pitch',v.pitch_deg===undefined?undefined:`${v.pitch_deg}°`);
     $('robot-pitch').style.transform=`rotate(${-Number(v.pitch_deg??0)}deg)`;put('peak',v.height_valid?`${v.peak_mm} mm`:'Not valid');put('hump',v.on_hump===undefined?undefined:v.on_hump?'Yes':'No');
+    put('line-guard',v.line_guard===undefined?undefined:v.line_guard?'On, line held straight':'Off');put('lifted',v.lifted===undefined?undefined:v.lifted?'Yes, wheels stopped':'No');$('lifted').classList.toggle('warn',Boolean(v.lifted));
     const mask=v.faults??0, fatal=mask&0x7ef;
     put('fault-mask',v.faults===undefined?'—':`0x${mask.toString(16).padStart(3,'0').toUpperCase()}`);
     put('fault-icon',v.faults===undefined?'·':mask?'!':'✓');

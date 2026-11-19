@@ -15,10 +15,10 @@ FIELDS = [
     ("line_state", 3), ("obstacle_state", 3), ("link", 2),
     ("on_hump", 1), ("height_valid", 1), ("encoder_left", 32),
     ("encoder_right", 32), ("wheel_left_offset", 10),
-    ("wheel_right_offset", 10),
+    ("wheel_right_offset", 10), ("lifted", 1), ("line_guard", 1),
 ]
 PACKET_BYTES = 28
-assert sum(width for _, width in FIELDS) == 221
+assert sum(width for _, width in FIELDS) == 223
 
 
 def decode(payload: bytes) -> dict[str, int | float | bool]:
@@ -26,7 +26,7 @@ def decode(payload: bytes) -> dict[str, int | float | bool]:
     if len(payload) != PACKET_BYTES:
         raise ValueError("telemetry requires exactly 28 bytes")
     word = int.from_bytes(payload, "little")
-    if word >> 221:
+    if word >> 223:
         raise ValueError("reserved padding bits are set")
     result = {}
     offset = 0

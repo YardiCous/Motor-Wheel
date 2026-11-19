@@ -12,8 +12,8 @@ def main():
         ("Motion snapshot", 5, 4, 32), ("Motion command", 4, 3, 24),
         ("Barcode event", 1, 1, 2), ("Hump event", 3, 2, 10),
         ("MQTT command", 2, 1, 6), ("Supervisory queue entry", 3, 5, 38),
-        ("Telemetry wire packet", len(FIELDS), PACKET_BYTES, 221),
-        ("Telemetry queue entry", len(FIELDS) + 1, 32, 253),
+        ("Telemetry wire packet", len(FIELDS), PACKET_BYTES, 223),
+        ("Telemetry queue entry", len(FIELDS) + 1, 32, 255),
         ("MQTT status", 2, 1, 2), ("MQTT acknowledgement", 4, 1, 8),
     ]
     rows = [{"message": name, "wide_bytes": struct.calcsize("<" + "I" * fields),
@@ -21,7 +21,7 @@ def main():
             for name, fields, size, bits in messages]
     queues = [("Motion", 4, 16, 3), ("Barcode", 4, 4, 1),
               ("Hump", 4, 12, 2), ("Supervisory", 8, 12, 5),
-              ("Telemetry", 1, 108, 32), ("ACK", 8, 12, 1)]
+              ("Telemetry", 1, 4 * (len(FIELDS) + 1), 32), ("ACK", 8, 12, 1)]
     rounded = lambda size: ((size + 3) // 4) * 4 + 4
     capacities = [{"queue": name, "depth": depth,
                    "wide_buffer_bytes": depth * rounded(wide),

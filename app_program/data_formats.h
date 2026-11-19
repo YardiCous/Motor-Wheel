@@ -45,7 +45,7 @@
 #define DATA_FORMATS_UTURN 3u
 
 #define DATA_FORMATS_MOTION_BITS (12u + 9u + 1u + 3u + 7u)
-#define DATA_FORMATS_PAYLOAD_BITS 221u
+#define DATA_FORMATS_PAYLOAD_BITS 223u
 
 #if (DATA_FORMATS_MOTION_BITS != 32u)
 #error Motion snapshot must occupy exactly thirty-two bits.

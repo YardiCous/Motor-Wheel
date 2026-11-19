@@ -236,11 +236,23 @@ void navigation_step(navigation_t * p_navigation, uint8_t motion_mode,
                 issue(p_navigation, MOTION_TURN, NAVIGATION_QUARTER_ARC_MM,
                       ROBOT_TURN_MM_SECOND, p_navigation->b_left);
             }
-            else if (b_done && (MOTION_IDLE == motion_mode))
+            else if (b_done && (MOTION_IDLE == motion_mode) &&
+                     ((b_line_valid) || (0u == ROBOT_LINE_STRADDLE)))
             {
                 p_navigation->state = DATA_FORMATS_FOLLOW;
                 issue(p_navigation, MOTION_FOLLOW, 0u,
                       ROBOT_CAUTIOUS_MM_SECOND, false);
+            }
+            else if (b_done && (MOTION_IDLE == motion_mode))
+            {
+                /* The turn may leave the sensors off the tape (19 Nov, the
+                 * team's choice): sweep left, then right, as after an
+                 * obstacle, until the tape is between the sensors. */
+                start_search(p_navigation, false);
+            }
+            else
+            {
+                /* The move or turn is still running. */
             }
             break;
 

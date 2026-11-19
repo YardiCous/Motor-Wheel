@@ -724,6 +724,8 @@ typedef struct
     uint32_t detected_mm : 12;
     bool b_first_forward : 1;
     bool b_line_seen : 1;
+    bool b_ir_left : 1;  /* GP26 line sensor sees black */
+    bool b_ir_right : 1; /* GP27 line sensor sees black */
     uint32_t side_remaining_mm : 12;
     uint32_t command;
     /* Last barcode letter, or '$' (JUNCTION_NONE) once used at a junction. */
@@ -751,6 +753,10 @@ The line sensors reached a junction: use the remembered letter ('$' carries stra
 `bool navigation_obstacle_route(navigation_t * p_navigation, uint16_t width_mm, uint16_t side_mm, bool b_left);`
 
 Accept the servo scan's route and any measured width.
+
+`void navigation_line_sensors(navigation_t * p_navigation, bool b_left_black, bool b_right_black);`
+
+Latest line sensor levels: the line search uses them separately.
 
 `void navigation_step(navigation_t * p_navigation, uint8_t motion_mode, bool b_done, bool b_line_valid, bool b_line_lost, bool b_on_hump, uint16_t range_cm, bool b_range_valid, bool b_scan_ready, bool b_scan_left, bool b_barcode_zone, bool b_safety_latched);`
 

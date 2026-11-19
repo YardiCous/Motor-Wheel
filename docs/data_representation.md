@@ -111,6 +111,8 @@ and the units for biased fields are described below and in the headers.
 | robot_os / shared_t | `b_line_lost` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_guard` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_lifted` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `b_ir_left` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `b_ir_right` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `recover` | 0..3 | 2 | unsigned bit-field |
 | robot_os / shared_t | `recover_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / shared_t | `reset_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
@@ -272,6 +274,8 @@ and the units for biased fields are described below and in the headers.
 | navigation / navigation_t | `detected_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `b_first_forward` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `b_line_seen` | 0..1 | 1 | bool bit-field |
+| navigation / navigation_t | `b_ir_left` | 0..1 | 1 | bool bit-field |
+| navigation / navigation_t | `b_ir_right` | 0..1 | 1 | bool bit-field |
 | navigation / navigation_t | `side_remaining_mm` | 0..4095 | 12 | unsigned bit-field |
 | navigation / navigation_t | `command` | 0..16777215 | 24 | explicit kind2 + distance12 + speed9 + reverse1; high8 zero |
 | obstacle / obstacle_t | `state` | 0..7 | 3 | unsigned bit-field |

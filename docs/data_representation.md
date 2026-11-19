@@ -111,6 +111,8 @@ and the units for biased fields are described below and in the headers.
 | robot_os / shared_t | `b_line_lost` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_line_guard` | 0..1 | 1 | bool bit-field |
 | robot_os / shared_t | `b_lifted` | 0..1 | 1 | bool bit-field |
+| robot_os / shared_t | `recover` | 0..3 | 2 | unsigned bit-field |
+| robot_os / shared_t | `recover_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / shared_t | `reset_at_ms` | 0..4294967295 | 32 | 32-bit modulo counter/time |
 | robot_os / cyclic_t | `phase` | 0..99 | 7 | unsigned bit-field |
 | robot_os / buttons_t | `stable_count` | 0..3 | 2 | unsigned bit-field |
@@ -223,6 +225,8 @@ and the units for biased fields are described below and in the headers.
 | terrain / terrain_t | `hump_ms` | 0..10000 | 14 | unsigned bit-field |
 | terrain / terrain_t | `gate_ms` | 0..511 | 9 | unsigned bit-field |
 | terrain / terrain_t | `guard_ms` | 0..511 | 9 | unsigned bit-field |
+| terrain / terrain_t | `guard_run` | 0..7 | 3 | unsigned bit-field |
+| terrain / terrain_t | `b_guard_left_up` | 0..1 | 1 | bool bit-field |
 | terrain / terrain_t | `impact_run` | 0..3 | 2 | unsigned bit-field |
 | terrain / terrain_t | `pitch_field` | 0..127 | 7 | unsigned bit-field |
 | terrain / terrain_t | `hump_peak_mm` | 0..255 | 8 | unsigned bit-field |

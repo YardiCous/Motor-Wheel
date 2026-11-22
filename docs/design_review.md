@@ -26,13 +26,13 @@ writer are retained, with integration explicitly owned by `robot_os`.
 
 | ID | Testable implementation requirement | Implementation | Verification |
 |---|---|---|---|
-| FR1 | Decode all four valid framed barcode symbols once; discard malformed widths and frames over 1 s | Line / barcode state machine | Host all-symbol/frame tests; physical format confirmation pending |
+| FR1 | Decode a scanned Code 39 letter and apply it once at the next junction; preserve malformed-frame rejection and bounded scanner behavior | Line / scanner / junction state machines | Host decoder/letter-table tests; physical printed barcode confirmation pending |
 | FR2 | Stop line following at range ≤400 mm, scan stationary, select a side with ≥700-mm coarse/fine clearance, execute bounded bypass legs | Navigation + Obstacle + Motion | Host scan/bypass sequence; physical obstacle course pending |
-| FR3 | Reacquire line with three consecutive 10-ms confirmations within 3 s after bypass; otherwise latch a fault | Navigation SEARCH | Host recovery/timeout; hardware pending |
+| FR3 | Reacquire line with three consecutive 10-ms confirmations within 7 s after bypass; otherwise latch a fault | Navigation SEARCH | Host recovery/timeout; hardware pending |
 | FR4 | Publish binary telemetry and status on the specified topics at 4 Hz; reconnect without using application motor tasks | Existing WiFi service + MQTT adapter | Build and codec/fragment tests; AP/broker tests pending |
-| FR5 | Execute LEFT/RIGHT 90°, STRAIGHT 120 mm, U-TURN 180° through one motion API | Navigation + per-wheel encoder controller | Host dispatch/turn completion; physical turn accuracy pending |
+| FR5 | Execute junction LEFT/RIGHT turns and U-TURN through the shared motion API; retain the legacy framed-barcode 120-mm STRAIGHT command for host compatibility | Navigation + per-wheel encoder controller | Host dispatch/turn completion; physical turn accuracy pending |
 | FR6 | Detect terrain above 5°; integrate path distance × pitch sine at finer than 1-mm resolution; report highest peak and collision | LSM303DLHC Terrain | Host 0.44-mm step, overflow, impact and I2C-failure cases; ramps pending |
-| FR7 | Track line at a cruise target up to 500 mm/s, reducing to 250 mm/s in barcode, hump and obstacle-warning zones | Line + Navigation + Motion | Host mode/caution checks; PID tuning pending |
+| FR7 | Host qualification uses cruise/caution/turn targets of 500/250/150 mm/s; the physical firmware default is 50 mm/s for every mode unless calibrated values are configured | Line + Navigation + Motion | Host mode/caution checks; PID tuning pending |
 | FR8 | Support local START/E-stop/RESET, offline startup, latched stop, and no automatic restart after fault/reset | Navigation + Safety | Host arbitration/latch checks; physical switches pending |
 | FR9 | Infer wheel direction from actual quadrature A/B transitions, including coasting and reverse | Shared GPIO ISR | Compile and wrap/edge guard tests; encoder signal capture pending |
 | FR10 | Use minimum logical widths for stored application fields, ISR data, queues and binary MQTT; synchronize packed RMW | All modules | Representation table, boundary tests, ARM memory probe |
@@ -52,7 +52,7 @@ course rules.
 | NFR5 | Ten correct passes for each barcode at 0.25 m/s and 0.5-m/s entry, zero wrong commands | Host decoder passes; printed course tests pending |
 | NFR6 | Peak height within ±10 mm over ten known-height ramp traversals | Fine fixed-point accumulation passes synthetic input; physical accuracy open |
 | NFR7 | Forward pings spaced ≥60 ms; median updated within 180 ms plus scheduling; no echo wait >25 ms | Timed nonblocking design; hardware timestamps required |
-| NFR8 | Minimum stopping clearance 120 mm; line recovery ≤3 s; stationary scan ≤8 s | Enforced limits and fail-safe exits; stopping/recovery video required |
+| NFR8 | Minimum stopping clearance 120 mm; line recovery ≤7 s; stationary scan ≤8 s | Enforced limits and fail-safe exits; stopping/recovery video required |
 
 ### Timing and numerical budgets
 
@@ -70,9 +70,12 @@ interrupt latency. The 50-ms end-to-end requirement still needs physical evidenc
 A stall is confirmed after 200 ms of a driven wheel producing no edges; the 50-ms
 shutdown bound is measured from confirmation, separately from detection time.
 
-At 500 mm/s, a 204.2-mm circumference and 960 edges/revolution produce about
-2351 edges/s per wheel. Both encoders share the short GPIO dispatcher with echo.
-The 64-edge-per-10-ms guard exceeds the expected operating count; invalid
+At the host-qualification cruise target of 500 mm/s, the host override uses
+960 edges/revolution and gives about 2351 edges/s per wheel. The physical
+firmware default uses 2400 edges/revolution, so the corresponding calculation
+is configuration-dependent and must be validated on hardware. Both encoders
+share the short GPIO dispatcher with echo. The motion guard must exceed the
+worst configured edge rate; invalid
 quadrature transitions and out-of-range deltas fault. Missed-edge testing remains open.
 
 ## 2. Hardware integration pin layout
@@ -159,7 +162,7 @@ stateDiagram-v2
     AVOID --> SEARCH: three bypass legs and four turns done
     FOLLOW --> SEARCH: line absent >=150 ms outside suppression
     SEARCH --> FOLLOW: three consecutive line confirmations
-    SEARCH --> FAULT: search >=3 s
+    SEARCH --> FAULT: search >=7 s
     AVOID --> FAULT: scan/clearance/motion deadline failure
     FOLLOW --> IDLE: STOP
     BARCODE --> IDLE: STOP
@@ -257,8 +260,8 @@ supervisory protocol, not authentication; access control belongs to the broker.
 stateDiagram-v2
     [*] --> CALIBRATING
     CALIBRATING --> TRACKING: 32 startup samples
-    TRACKING --> SCAN: valid right-lane entry guard
-    SCAN --> TRACKING: valid symbol / invalid width / timeout / reverse
+    TRACKING --> SCAN: legacy framed-barcode entry guard
+    SCAN --> TRACKING: valid legacy symbol / invalid width / timeout / reverse
     TRACKING --> JUNCTION: all sensors black
     JUNCTION --> TRACKING: junction clears or 300 ms elapsed
     TRACKING --> SEARCH: line missing >=150 ms
@@ -269,7 +272,9 @@ Thresholds start from configured calibration values; startup sampling is not a
 claim that the robot has automatically swept white and black references.
 `line_calibrate` accepts measured reference samples. The shared sensors retain
 12-bit precision; normalized steering uses offset binary -127..127. See the
-[provisional barcode format](barcode_protocol.md). Barcode SCAN, junctions and
+[Code 39 barcode protocol](barcode_protocol.md). The normal firmware uses the
+streaming GP28 Code 39 scanner; the legacy framed-barcode SCAN state is retained
+only with `ROBOT_LINE_FRAMED_BARCODE=1`. Barcode detection, junctions and
 intentional navigation departures suppress ordinary line-loss only under bounded
 state-machine deadlines.
 
@@ -339,7 +344,7 @@ must be validated; fixed-point precision alone does not establish ±10-mm accura
 | ID | Assumption | Risk if false | Validation / owner | Status |
 |---|---|---|---|---|
 | A1 | Low-priority WiFi work preserves control timing | Missed deadlines or unnecessary watchdog stop | AP drop/rejoin plus GP18 jitter trace / Wylie | Open |
-| A2 | Both encoder A/B channels exist; 960 edges/rev and 204.2-mm circumference are correct | Wrong distance/direction | Scope quadrature; ten 1-m and 90° repeats / Gordon | Open |
+| A2 | Both encoder A/B channels exist; 2400 edges/rev, 204.2-mm circumference and 112-mm track are correct | Wrong distance/direction | Scope quadrature; ten 1-m and 90° repeats / Gordon | Open |
 | A3 | Manual PID gains and 10-ms loop are stable | Drift or oscillation | Speed steps at high/low battery / Gordon | Open |
 | A4 | Motor signs and accelerometer +X/+Z mounting match configuration | Wrong turns or hump sign | Wheels lifted; flat/tilt checks / Gordon and Ernest | Open |
 | A5 | Dedicated right barcode lane and provisional symbology match the course | Junction confusion / wrong decode | Confirm printout; 40 passes at both entry speeds / Jia Jun | Open |

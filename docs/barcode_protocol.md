@@ -1,39 +1,45 @@
-# Provisional four-command barcode protocol
+# GP28 Code 39 barcode protocol
 
-No official course barcode symbology or sample was supplied. This is an explicit,
-implemented assumption, retained after the user directed us to follow the
-documented hardware first. Confirm the course printout before track qualification.
-The format can be changed within `line.c` without changing the packed command API.
+No official course barcode symbology or sample was supplied. Confirm the course
+printout before track qualification. The current scanner implementation reads
+standard Code 39 patterns and maps A..Z letters to junction actions.
 
-GP26 and GP27 straddle the tracking line; GP28 observes a separate barcode lane
-along straight track. Larger ADC readings mean black; use `line_calibrate` with
-measured white/black references, or adjust the configured threshold. Preserve
-12-bit ADC readings. The default threshold is a provisional 2048.
+GP26 and GP27 straddle the tracking line. GP28 reads a separate barcode lane.
+ADC readings are preserved at 12 bits. Larger readings mean black, with per-sensor
+default thresholds configured in `robot_config.h`. The sensor thresholds can be
+calibrated with measured white/black samples.
 
-A frame starts after a black guard 24..36 mm long. It then contains:
+The streaming scanner starts at a white-to-black edge while the wheels move.
+It measures every alternating bar and gap in mean wheel encoder edges. It stops
+after a long white quiet zone or immediately when `scanner_flush()` is called as
+the line sensors reach a junction. The scan uses encoder distance rather than
+timing, so its measurements are intended to remain stable across forward speed
+changes.
 
-1. White gap, 4..12 mm.
-2. Black data bar for the most significant bit.
-3. White gap, 4..12 mm.
-4. Black data bar for the least significant bit.
-5. White gap, 4..12 mm.
-6. Black stop guard, 24..36 mm, terminated by white.
+Each Code 39 character contains nine alternating elements: five bars and four
+gaps, starting with a bar. Exactly three elements are wide. Characters are
+separated by a narrow white gap, and printed barcodes are framed by `*`; for
+example, `*A*` is 29 measured elements. The decoder accepts `*X*`, `*X`, `X*`,
+or a lone `X`-style partial reading and rejects unknown or unclear patterns.
+Reverse travel is handled by trying the widths in reverse.
 
-A data bar 4..12 mm means 0; 14..22 mm means 1. Widths in between or outside
-these bands invalidate the frame. Commands are 00 LEFT, 01 RIGHT, 10 STRAIGHT,
-and 11 U-TURN. Widths come from forward modulo-4096 encoder distance, not time.
-Reverse travel invalidates a frame. A complete frame times out at 1000 ms.
+The last A..Z letter is remembered until the next junction. The table in
+`junction.c` assigns one action to each letter:
 
-At 0.5 m/s the entry guard provides multiple samples before the controller
-slows to 0.25 m/s for SCAN/JUNCTION. A barcode event is emitted exactly once
-on a valid stop edge. Line-loss suppression during SCAN is limited by the frame
-timeout; JUNCTION suppression lasts at most 300 ms. Outside planned departures,
-150 ms without line visibility enters line search. Search is limited to 3 s.
+- A..P, R..V and X..Y: FORWARD
+- F: U-TURN
+- Q and Z: RIGHT
+- No letter: FORWARD
 
-LEFT/RIGHT execute a calibrated 90-degree encoder turn. U-TURN uses twice that
-wheel arc. STRAIGHT moves 120 mm before returning to line following. The last
-valid decoded command remains available in telemetry; queue events are one-shot.
+The table is explicit implementation data and may be changed for the course.
+The LEFT action exists in the API but no letter currently maps to it.
 
-Host tests cover all four symbols, malformed frames/timeouts, and line loss.
-Hardware qualification requires ten successful runs per symbol at 0.25 m/s,
-then the 0.5-m/s entry speed with automatic slowdown, with zero wrong commands.
+At a junction, the remembered letter is used once and cleared. The robot then
+executes FORWARD, LEFT, RIGHT or U-TURN, while unknown and non-letter readings
+are ignored. Host tests cover the letter/action table and stored one-shot
+behavior. Physical qualification still requires the actual printed barcodes,
+entry speed, junction position and scanner threshold to be confirmed.
+
+The old two-bit framed barcode remains opt-in only for host compatibility:
+`ROBOT_LINE_FRAMED_BARCODE=1` enables the legacy implementation in `line.c`.
+The normal firmware default is `0`, with the streaming Code 39 scanner active.

@@ -48,11 +48,12 @@ Both include the startup and task-priority fixes. Every build checks that
 robot tasks outrank USB and WiFi services. Hold BOOTSEL while connecting USB
 and copy the selected UF2 onto RPI-RP2.
 
-Serial monitor output is disabled for all builds, including boot messages,
-diagnostics, faults, and bench-test reports. USB and UART console writes are
-discarded; MQTT telemetry remains available. Console-output descriptions below
-and in the test guides document the diagnostic messages but no longer produce
-serial output.
+The default build uses the USB CDC console. Console diagnostics are available
+for boot/watchdog, range, physical-test, encoder-test and bench-test messages
+that enable `tm_printf()`. MQTT telemetry remains available without console
+output and continues to operate when the USB cable is disconnected.
+Set `CRASH_REPORT=1` to mirror console and panic output to UART0 on GP0/GP1;
+UART mirroring conflicts with the ultrasonic-ranging pins.
 
 GP0/GP1 belong to ultrasonic ranging: use USB console and `CRASH_REPORT=0`.
 The hardware driver rejects UART-console builds that would claim those pins.
@@ -65,15 +66,15 @@ The command above produces
 
 Build with `MOTOR_TEST=1` only for a bench test. The resulting image keeps the
 motors off until the local START switch is pressed, then runs a
-500-mm forward move, stop, 500-mm reverse move, stop, left turn, stop, right
+600-mm forward move, stop, 600-mm reverse move, stop, left turn, stop, right
 turn, and stop. Each movement is encoder-controlled at 70 mm/s and stops
 after the target encoder distance. It prints phase messages on the USB console
 and stops on an encoder stall or the active-low E-stop on GP21. Keep the wheels
 lifted for the first run, release START before boot, and keep the E-stop
 accessible. RESET on GP22 returns the test to its armed, motor-off state.
 
-The left and right turns target 90 degrees using 98 mm of wheel travel,
-scaled from the measured 95 degrees at 103 mm. Straight moves balance
+The left and right turns target 90 degrees using the configured
+`ROBOT_QUARTER_TURN_MM` value, currently 92 mm. Straight moves balance
 cumulative encoder travel with a small leftward trim: right wheel +0.5%,
 left wheel -0.5%, to compensate for the remaining right drift. Confirm the
 angle and straight tracking on the floor after flashing; slip and unequal
@@ -120,9 +121,9 @@ moves before returning to the line. The plan records the width, sideways
 offset, saved forward distance, and selected side.
 After each forward leg it turns 90 degrees toward the obstacle and checks.
 If still blocked, it turns 90 degrees back, waits for a fresh forward reading,
-then advances another 140 mm in obstacle-test mode (70 mm/s times 2000 ms).
+then advances another 100 mm in obstacle-test mode (50 mm/s times 2000 ms).
 This repeats up to the configured retry limit. A clear side check starts a
-200-mm forward margin, followed by another check before returning to the line;
+150-mm forward margin (`ROBOT_WIDTH_MM / 2 + 50`), followed by another check before returning to the line;
 a blocked margin recheck resumes the retry loop.
 The servo scan has an 8-second deadline. Each bypass turn and leg has a
 10-second limit. Large sideways offsets are split into checked moves of at
@@ -143,13 +144,14 @@ countdown. `ECHO` diagnostics report `tick=0x20c` for the expected setup.
 
 See [TEAM.md](TEAM.md) for every pin and peripheral owner. The implementation
 uses the documented A/B encoders and gyro-free GY-511 / LSM303DLHC, as directed
-in this session. Wheel circumference, 960 quadrature edges/revolution, motor
-polarity, 140-mm track, IR thresholds, and servo limits are provisional values
+in this session. Wheel circumference, 2400 quadrature edges/revolution, motor
+polarity, 112-mm track, IR thresholds, and servo limits are provisional values
 in [robot_config.h](app_program/robot_config.h) that require bench calibration.
 
-The course barcode format was not supplied. A complete provisional format and
-four-symbol decoder are specified in [barcode_protocol.md](docs/barcode_protocol.md).
-Place GP28 over the separate barcode lane; GP26/27 track the line.
+The course barcode format was not supplied. The firmware currently decodes
+Code 39 letters from GP28 and applies the A..Z junction table documented in
+[barcode_protocol.md](docs/barcode_protocol.md). Place GP28 over the separate
+barcode lane; GP26/27 track the line.
 
 Local active-low switches connect GP20 START, GP21 E-stop, and GP22 RESET to
 GND. Boot holds motor drive off until stationary IMU calibration and line-sensor

@@ -38,6 +38,11 @@ Newest at the bottom. Never delete a row.
 
 | Date | Subsystem | Test ID / demo | Commit | Student ID | Link | Notes |
 |---|---|---|---|---|---|---|
-| YYYY-MM-DD | S1 | S1-U03 | `abc1234` | | <https://youtu.be/...> | LED blinks at 2 Hz |
-| 2026-10-23 | S2 | S2-U01 | `         | | (https://youtube.com/shorts/tDaFEudXuF0) | Motor moves front, reverses, turn left and turn right |
-
+| 2026-10-23 | S2 | S2-U01 | `35d5c16` | | https://youtube.com/shorts/tDaFEudXuF0 | Motor moves front, reverses, turn left and turn right |
+| 2026-11-06 | S1 - S5 | ALL-U01 | `5d82670` | | https://youtube.com/shorts/w-7WDevNEQU | All LEDs blinking |
+| 2026-11-06 | S5 | S5-U01 | `5d82670` | | https://youtu.be/diCABZcrVwM | Obstacle can bypass |
+| 2026-11-06 | S5 | S5-U02 | `5d82670` | | https://youtube.com/shorts/pmjnHA5H1rs | Obstacle can bypass |
+| 2026-11-06 | S3 | S3-U01 | `5d82670` | | https://youtu.be/2otoH5Rzr1w | Barcode can get alphabet |
+| 2026-11-06 | S3 | S3-U02 | `5d82670` | | https://youtu.be/RbboIaG_dns | Barcode can get alphabet |
+| 2026-11-18 | S4 | S4-U01 | `d26ab08` | | https://youtube.com/shorts/p3Vi7uIfzRw | Can get hump height |
+| 2026-11-18 | S3 | S3-U03 | `d26ab08` | | https://youtube.com/shorts/Yu3QxEyx8QI | Can line track and get barcode |
